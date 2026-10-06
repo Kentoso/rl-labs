@@ -8,7 +8,13 @@ dependencies = [
     "gymnasium[box2d]>=1.3.0",
     "matplotlib>=3.11.2",
     "swig>=4.5.0",
+    "tqdm>=4.70.1",
 ]
 
 [tool.pyrefly]
-search-path = ["lab1"]
+search-path = ["lab1", "lab2"]
+
+[dependency-groups]
+dev = [
+    "types-tqdm>=4.70.0.20260906",
+]

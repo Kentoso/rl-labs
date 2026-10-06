@@ -27,6 +27,15 @@ wheels = [
 ]
 
 [[package]]
+name = "colorama"
+version = "0.4.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz", hash = "sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44", size = 27697, upload-time = "2022-10-25T02:36:22.414Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl", hash = "sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6", size = 25335, upload-time = "2022-10-25T02:36:20.889Z" },
+]
+
+[[package]]
 name = "contourpy"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -521,6 +530,12 @@ dependencies = [
     { name = "gymnasium", extra = ["box2d"] },
     { name = "matplotlib" },
     { name = "swig" },
+    { name = "tqdm" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "types-tqdm" },
 ]
 
 [package.metadata]
@@ -528,7 +543,11 @@ requires-dist = [
     { name = "gymnasium", extras = ["box2d"], specifier = ">=1.3.0" },
     { name = "matplotlib", specifier = ">=3.11.2" },
     { name = "swig", specifier = ">=4.5.0" },
+    { name = "tqdm", specifier = ">=4.70.1" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "types-tqdm", specifier = ">=4.70.0.20260906" }]
 
 [[package]]
 name = "six"
@@ -562,6 +581,27 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/6b/75/d021463537e8cffd4d3f88228184e7b6aa6641ad97f0fc87f0195ec24150/swig-4.5.0-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:762638d3f1fa1f27b09f8ef6854ffc0744e0f54ead3b19bfec5d22244bb9872f", size = 3105789, upload-time = "2026-08-21T18:28:40.532Z" },
     { url = "https://files.pythonhosted.org/packages/05/f6/702e2a36f77302baaa5531f0282b34bd1ca935134d6ac9d112db06e93b96/swig-4.5.0-py3-none-win_amd64.whl", hash = "sha256:030fcc0fcc7493a2ee78e167ef87ee550cedd712ed7e6fdf220b90e160d431dd", size = 2617030, upload-time = "2026-08-21T18:28:42.307Z" },
     { url = "https://files.pythonhosted.org/packages/1f/25/7d3c3cc8026a1f02be42e345877844472e618cb9f4c7ac78f2f766f2575a/swig-4.5.0-py3-none-win_arm64.whl", hash = "sha256:5cb1e345a7ae83e2b949262f46785bcdbe0f5c82916cba848322167efefc0db5", size = 2617031, upload-time = "2026-08-21T18:28:44.234Z" },
+]
+
+[[package]]
+name = "tqdm"
+version = "4.70.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0d/ea/b2a5bd54b28a324dae8211928b2d730b6547500342c7e6c6dea08bd0a485/tqdm-4.70.1.tar.gz", hash = "sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4", size = 171846, upload-time = "2026-09-11T07:25:16.601Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl", hash = "sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73", size = 80199, upload-time = "2026-09-11T07:25:14.599Z" },
+]
+
+[[package]]
+name = "types-tqdm"
+version = "4.70.0.20260906"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fe/92/517d71d5a399cd2f8ead3b4328d987262478f22fbbe7f8312360d4c321d0/types_tqdm-4.70.0.20260906.tar.gz", hash = "sha256:6581dc996152a87d51ce2ea169169187ffc0a96dacdb8adbdef29cbee8c1e631", size = 19309, upload-time = "2026-09-06T06:35:31.916Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/81/ea/d12697988ab2c672877796ecaea69666e2379ee7b40f01f4540250d5a97b/types_tqdm-4.70.0.20260906-py3-none-any.whl", hash = "sha256:c3b88c694928515d601f73fa6646aa43adc0ef735bedbeebf0cc543f6a201ae8", size = 25181, upload-time = "2026-09-06T06:35:30.931Z" },
 ]
 
 [[package]]
