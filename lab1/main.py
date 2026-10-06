@@ -1,4 +1,5 @@
 import argparse
+import pickle
 from pathlib import Path
 
 import gymnasium as gym
@@ -13,6 +14,7 @@ from value_iteration import ValueIteration
 
 RESULTS_PATH = Path(__file__).with_name("training_results.png")
 POLICY_MAPS_DIR = Path(__file__).with_name("policy_maps")
+POLICIES_DIR = Path(__file__).with_name("policies")
 SNAPSHOT_EVERY = 10
 
 INK = "#0b0b0b"
@@ -198,6 +200,19 @@ def print_setup(method: DiscreteCar) -> None:
     print()
 
 
+# The final policy as plain ints per grid cell, so demo.py can replay it without training
+def save_policy(method: DiscreteCar, path: Path) -> None:
+    data = {
+        "n_positions": method.n_positions,
+        "n_velocities": method.n_velocities,
+        "policy": {state: int(method.policy_action(state)) for state in method.states},
+    }
+    path.parent.mkdir(exist_ok=True)
+    with open(path, "wb") as f:
+        pickle.dump(data, f)
+    print(f"Saved policy to {path}")
+
+
 def watch_episode(agent: CarAgent, seed: int) -> None:
     env = gym.make("MountainCar-v0", render_mode="human")
     episode = agent.run_episode(env, seed=seed)
@@ -243,6 +258,7 @@ def main() -> None:
     # Also keep the final policy
     save_policy_map(method, len(history.deltas), snapshots)
     print(f"Saved policy maps to {snapshots}")
+    save_policy(method, POLICIES_DIR / f"{args.method}.pkl")
 
     episode = agent.run_episode(env, seed=1234)
     print(

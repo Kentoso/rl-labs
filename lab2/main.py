@@ -1,4 +1,6 @@
 import argparse
+import pickle
+from pathlib import Path
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
@@ -16,6 +18,22 @@ from plots import (
     style_axis,
 )
 from training import Shaping, TrainingRun, run_greedy, train
+
+POLICIES_DIR = Path(__file__).with_name("policies")
+
+
+# The greedy policy as plain ints per grid cell, so demo.py can replay it without training
+def save_policy(agent: MonteCarloAgent, path: Path) -> None:
+    grid = agent.grid
+    data = {
+        "n_positions": grid.n_positions,
+        "n_velocities": grid.n_velocities,
+        "policy": {state: int(agent.greedy_action(state)) for state in grid.states},
+    }
+    path.parent.mkdir(exist_ok=True)
+    with open(path, "wb") as f:
+        pickle.dump(data, f)
+    print(f"Saved policy to {path}")
 
 
 def watch_episode(agent: MonteCarloAgent, seed: int) -> None:
@@ -89,6 +107,7 @@ def main() -> None:
 
     shaping = Shaping(args.velocity_weight, args.position_weight)
     run = train(shaping, args.episodes, args.bins)
+    save_policy(run.agent, POLICIES_DIR / f"{shaping.name}.pkl")
 
     sample_env = gym.make("MountainCar-v0")
     trajectory, sample_return, reached = run_greedy(run.agent, sample_env, seed=1234)
