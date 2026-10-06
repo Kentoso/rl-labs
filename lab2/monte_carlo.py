@@ -1,6 +1,6 @@
 import random
 
-from car_grid import Action, CarGrid, StateIndices
+from car_grid import ACTIONS, Action, CarGrid, StateIndices
 
 # One step of an episode: the state, the action taken in it, and the reward that followed
 Step = tuple[StateIndices, Action, float]
@@ -32,7 +32,7 @@ class MonteCarloAgent:
     def get_action(self, state: StateIndices) -> Action:
         # With probability epsilon explore, otherwise take the best known action
         if self.rng.random() < self.epsilon:
-            return self.rng.choice(list(Action))
+            return self.rng.choice(ACTIONS)
         return self.greedy_action(state)
 
     def greedy_action(self, state: StateIndices) -> Action:
@@ -42,12 +42,15 @@ class MonteCarloAgent:
     def update(self, episode: list[Step]) -> None:
         # Walk backwards, accumulating the discounted return G from each step
         g = 0.0
+        total_error = 0.0
         for state, action, reward in reversed(episode):
             g = reward + self.discount_factor * g
             # Every visit moves Q towards its return; recent episodes weigh more
             error = g - self.q_values[state][action]
             self.q_values[state][action] += self.lr * error
-            self.training_error.append(error)
+            total_error += abs(error)
+        # One number per episode: 20M per-step errors would take too much memory
+        self.training_error.append(total_error / len(episode))
 
     def decay_epsilon(self) -> None:
         self.epsilon = max(self.final_epsilon, self.epsilon - self.epsilon_decay)

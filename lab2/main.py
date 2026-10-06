@@ -1,170 +1,40 @@
 import argparse
-from pathlib import Path
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import ListedColormap
-from tqdm import tqdm
+import pygame
 
-from car_grid import Action, CarGrid, StateIndices
-from monte_carlo import MonteCarloAgent, Step
-
-RESULTS_PATH = Path(__file__).with_name("training_results.png")
-
-INK = "#0b0b0b"
-MUTED = "#898781"
-GRID = "#e1e0d9"
-SERIES = "#2a78d6"
-GOAL = "#1f9d55"
-ACTION_COLORS = {
-    Action.PUSH_LEFT: "#2a78d6",
-    Action.NO_PUSH: "#e1e0d9",
-    Action.PUSH_RIGHT: "#eb6834",
-}
-ACTION_LABELS = {
-    Action.PUSH_LEFT: "Push left",
-    Action.NO_PUSH: "No push",
-    Action.PUSH_RIGHT: "Push right",
-}
+from monte_carlo import MonteCarloAgent
+from plots import (
+    INK,
+    MUTED,
+    RESULTS_DIR,
+    moving_average,
+    plot_line,
+    plot_policy_map,
+    style_axis,
+)
+from training import Shaping, TrainingRun, run_greedy, train
 
 
-def style_axis(ax: plt.Axes, title: str, xlabel: str, ylabel: str) -> None:
-    ax.set_title(title, loc="left", fontsize=11, color=INK)
-    ax.set_xlabel(xlabel, color=MUTED)
-    ax.set_ylabel(ylabel, color=MUTED)
-    ax.tick_params(colors=MUTED, labelsize=9)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    for side in ("left", "bottom"):
-        ax.spines[side].set_color("#c3c2b7")
-
-
-def plot_line(ax: plt.Axes, x, y, **kwargs) -> None:
-    ax.plot(x, y, color=SERIES, linewidth=2, **kwargs)
-    ax.grid(axis="y", color=GRID, linewidth=0.8)
-    ax.set_axisbelow(True)
-
-
-def moving_average(values: list[float], window: int) -> np.ndarray:
-    return np.convolve(values, np.ones(window) / window, mode="valid")
-
-
-def plot_policy_map(ax: plt.Axes, agent: MonteCarloAgent) -> None:
-    grid = agent.grid
-    extent = (grid.min_position, grid.max_position, -grid.max_speed, grid.max_speed)
-    # Image rows are velocity bins j, columns are position bins i
-    positions, velocities = range(grid.n_positions), range(grid.n_velocities)
-    policy_grid = [
-        [agent.greedy_action(StateIndices((i, j))) for i in positions]
-        for j in velocities
-    ]
-    ax.imshow(
-        policy_grid,
-        origin="lower",
-        extent=extent,
-        aspect="auto",
-        cmap=ListedColormap([ACTION_COLORS[a] for a in Action]),
-        vmin=-0.5,
-        vmax=2.5,
-        interpolation="nearest",
-    )
-    goal = plt.Rectangle(
-        (grid.goal_position, grid.goal_velocity),
-        grid.max_position - grid.goal_position,
-        grid.max_speed - grid.goal_velocity,
-        fill=False,
-        edgecolor=GOAL,
-        linewidth=2.5,
-        clip_on=False,
-    )
-    ax.add_patch(goal)
-    handles = [plt.Rectangle((0, 0), 1, 1, color=ACTION_COLORS[a]) for a in Action]
-    labels = [ACTION_LABELS[a] for a in Action]
-    handles.append(plt.Rectangle((0, 0), 1, 1, fill=False, edgecolor=GOAL, linewidth=2))
-    labels.append("Goal zone")
-    ax.legend(handles, labels, loc="upper left", fontsize=8, frameon=True)
-
-
-# Play a whole episode with the exploring policy, then learn from it
-def train_episode(env: gym.Env, agent: MonteCarloAgent) -> None:
-    observation, _ = env.reset()
-    episode: list[Step] = []
-    while True:
-        state = agent.grid.observe(observation)
-        action = agent.get_action(state)
-        observation, reward, terminated, truncated, _ = env.step(action)
-        episode.append((state, action, float(reward)))
-        if terminated or truncated:
-            break
-    agent.update(episode)
-
-
-# Greedy policy, no exploration and no learning
-def evaluate(agent: MonteCarloAgent, n_episodes: int) -> tuple[float, float]:
-    env = gym.make("MountainCar-v0")
-    returns, successes = [], []
-    for seed in range(n_episodes):
-        observation, _ = env.reset(seed=seed)
-        total_reward = 0.0
-        while True:
-            observation, reward, terminated, truncated, _ = env.step(
-                agent.act(observation)
-            )
-            total_reward += float(reward)
-            if terminated or truncated:
-                break
-        returns.append(total_reward)
-        successes.append(terminated)
-    env.close()
-    return float(np.mean(returns)), float(np.mean(successes))
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--episodes", type=int, default=100_000)
-    parser.add_argument("--bins", type=int, default=40)
-    args = parser.parse_args()
-
-    n_episodes = args.episodes
-    # Constant step size, so older episodes are gradually forgotten
-    learning_rate = 0.1
-    # Exploration schedule from the Gymnasium tutorial
-    start_epsilon = 1.0
-    epsilon_decay = start_epsilon / (n_episodes / 2)
-    final_epsilon = 0.1
-    eval_every = n_episodes // 20
-    eval_episodes = 20
-
-    env = gym.make("MountainCar-v0")
-    env = gym.wrappers.RecordEpisodeStatistics(env, buffer_length=n_episodes)
-    env.reset(seed=0)
-    grid = CarGrid(env, args.bins, args.bins)
-    agent = MonteCarloAgent(
-        grid, learning_rate, start_epsilon, epsilon_decay, final_epsilon
-    )
-    print(f"Grid {args.bins} x {args.bins}, {n_episodes} episodes")
-
-    eval_points, eval_returns, eval_success = [], [], []
-    for episode in tqdm(range(1, n_episodes + 1)):
-        train_episode(env, agent)
-        agent.decay_epsilon()
-        if episode % eval_every == 0:
-            mean_return, success_rate = evaluate(agent, eval_episodes)
-            eval_points.append(episode)
-            eval_returns.append(mean_return)
-            eval_success.append(success_rate)
-            # tqdm.write prints above the progress bar instead of breaking it
-            tqdm.write(
-                f"episode {episode:7d}  epsilon {agent.epsilon:.2f}  "
-                f"greedy return {mean_return:7.1f}  success {success_rate:.0%}"
-            )
+def watch_episode(agent: MonteCarloAgent, seed: int) -> None:
+    env = gym.make("MountainCar-v0", render_mode="human")
+    states, _, _ = run_greedy(agent, env, seed)
+    print(f"Demo episode: {len(states) - 1} steps. Close the window to see the plots.")
+    # Keep the last frame on screen until the window is closed
+    while not any(event.type == pygame.QUIT for event in pygame.event.get()):
+        pygame.time.wait(50)
     env.close()
 
-    window = max(1, n_episodes // 200)
-    fig, axes = plt.subplots(2, 2, figsize=(12, 9), layout="constrained")
+
+def plot_results(run: TrainingRun, trajectory: np.ndarray) -> plt.Figure:
+    window = max(1, len(run.training_returns) // 200)
+    fig, axes = plt.subplots(2, 3, figsize=(17, 9), layout="constrained")
+    grid = run.agent.grid
     fig.suptitle(
-        f"MountainCar · Monte Carlo, {args.bins} x {args.bins} grid",
+        f"MountainCar · Monte Carlo, {grid.n_positions} x {grid.n_velocities} grid, "
+        f"{run.shaping.name}",
         x=0.01,
         ha="left",
         fontsize=14,
@@ -172,37 +42,65 @@ def main() -> None:
     )
 
     ax = axes[0, 0]
-    training_returns = list(env.return_queue)
-    plot_line(
-        ax,
-        range(window, len(training_returns) + 1),
-        moving_average(training_returns, window),
-    )
+    returns = run.training_returns
+    plot_line(ax, range(window, len(returns) + 1), moving_average(returns, window))
     style_axis(
         ax, f"Training return (moving average, {window} episodes)", "Episode", "Return"
     )
 
     ax = axes[0, 1]
-    plot_line(ax, eval_points, eval_returns, marker="o", markersize=5)
+    plot_line(ax, run.eval_points, run.eval_returns, marker="o", markersize=5)
     ax.axhline(-200, color=MUTED, linewidth=1, linestyle=":")
     style_axis(ax, "Greedy policy · mean return", "Episode", "Return")
 
-    ax = axes[1, 0]
-    errors = [abs(e) for e in agent.training_error]
-    error_window = window * 200
-    plot_line(
-        ax,
-        range(error_window, len(errors) + 1),
-        moving_average(errors, error_window),
+    ax = axes[0, 2]
+    success = [100 * s for s in run.eval_success]
+    plot_line(ax, run.eval_points, success, marker="o", markersize=5)
+    ax.set_ylim(-5, 105)
+    style_axis(
+        ax, "Greedy policy · success rate", "Episode", "Episodes reaching the flag (%)"
     )
-    style_axis(ax, "Absolute error |G − Q| (moving average)", "Update", "|G − Q|")
+
+    ax = axes[1, 0]
+    plot_line(ax, range(1, len(run.epsilons) + 1), run.epsilons)
+    ax.set_ylim(0, 1.05)
+    style_axis(ax, "Exploration rate ε", "Episode", "ε")
 
     ax = axes[1, 1]
-    plot_policy_map(ax, agent)
-    style_axis(ax, "Greedy policy", "Position", "Velocity")
+    errors = run.agent.training_error
+    plot_line(ax, range(window, len(errors) + 1), moving_average(errors, window))
+    style_axis(ax, "Mean |G − Q| per episode (moving average)", "Episode", "|G − Q|")
 
-    fig.savefig(RESULTS_PATH, dpi=120)
-    print(f"Saved plots to {RESULTS_PATH}")
+    ax = axes[1, 2]
+    plot_policy_map(ax, run.agent)
+    ax.plot(trajectory[:, 0], trajectory[:, 1], color=INK, linewidth=1.5)
+    ax.plot(*trajectory[0], "o", color=INK, markersize=8)
+    style_axis(ax, "Greedy policy + sample trajectory", "Position", "Velocity")
+    return fig
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--episodes", type=int, default=100_000)
+    parser.add_argument("--bins", type=int, default=200)
+    parser.add_argument("--velocity-weight", type=float, default=0.5)
+    parser.add_argument("--position-weight", type=float, default=0.3)
+    args = parser.parse_args()
+
+    shaping = Shaping(args.velocity_weight, args.position_weight)
+    run = train(shaping, args.episodes, args.bins)
+
+    sample_env = gym.make("MountainCar-v0")
+    trajectory, sample_return, reached = run_greedy(run.agent, sample_env, seed=1234)
+    sample_env.close()
+    print(f"Sample episode: return {sample_return}, reached goal: {reached}")
+    watch_episode(run.agent, seed=1234)
+
+    fig = plot_results(run, trajectory)
+    RESULTS_DIR.mkdir(exist_ok=True)
+    path = RESULTS_DIR / f"{shaping.name}.png"
+    fig.savefig(path, dpi=120)
+    print(f"Saved plots to {path}")
     plt.show()
 
 

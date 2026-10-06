@@ -12,6 +12,9 @@ class Action(IntEnum):
     PUSH_RIGHT = 2
 
 
+# Built once, so random exploration doesn't create a new list on every step
+ACTIONS = list(Action)
+
 # Grid cell (i, j): position bin i, velocity bin j
 StateIndices = NewType("StateIndices", tuple[int, int])
 # The car's real (position, velocity)
