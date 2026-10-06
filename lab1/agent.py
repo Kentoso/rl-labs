@@ -1,14 +1,21 @@
 from dataclasses import dataclass, field
+from enum import IntEnum
 from typing import Protocol
 
 import gymnasium as gym
 import numpy as np
 
 
+class Action(IntEnum):
+    PUSH_LEFT = 0
+    NO_PUSH = 1
+    PUSH_RIGHT = 2
+
+
 class PolicyMethod(Protocol):
     def update(self) -> float: ...
 
-    def act(self, observation: np.ndarray) -> int: ...
+    def act(self, observation: np.ndarray) -> Action: ...
 
 
 @dataclass
@@ -32,7 +39,7 @@ class CarAgent:
         self.method = method
         self.seed = seed
 
-    def act(self, observation: np.ndarray) -> int:
+    def act(self, observation: np.ndarray) -> Action:
         return self.method.act(observation)
 
     def train(

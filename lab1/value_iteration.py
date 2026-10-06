@@ -1,8 +1,15 @@
 import math
+from typing import NewType
 
 import gymnasium as gym
 import numpy as np
+from agent import Action
 from gymnasium.envs.classic_control.mountain_car import MountainCarEnv
+
+# Grid cell (i, j): position bin i, velocity bin j
+StateIndices = NewType("StateIndices", tuple[int, int])
+# The car's real (position, velocity)
+PhysicalState = NewType("PhysicalState", tuple[float, float])
 
 
 class ValueIteration:
@@ -23,7 +30,7 @@ class ValueIteration:
         self.max_speed = car.max_speed
         self.goal_position = car.goal_position
         self.goal_velocity = car.goal_velocity
-        self.actions = list(range(car.action_space.n))
+        assert car.action_space.n == len(Action)
         self.gamma = gamma
 
         self.n_positions = n_positions
@@ -38,63 +45,70 @@ class ValueIteration:
         self.position_step = self.positions[1] - self.positions[0]
         self.velocity_step = self.velocities[1] - self.velocities[0]
 
-        # A discrete state is a grid cell (i, j): position bin i, velocity bin j
-        self.states = [(i, j) for i in range(n_positions) for j in range(n_velocities)]
+        self.states = [
+            StateIndices((i, j))
+            for i in range(n_positions)
+            for j in range(n_velocities)
+        ]
         self.values = {state: 0.0 for state in self.states}
 
         # The car is deterministic, so the model is one (next_state, done) per state and action
-        self.model = {}
+        self.model: dict[tuple[StateIndices, Action], tuple[StateIndices, bool]] = {}
         for state in self.states:
-            pos, vel = self.to_continuous(state)
-            for action in self.actions:
-                next_pos, next_vel = self.step(pos, vel, action)
-                next_state = self.to_discrete(next_pos, next_vel)
+            physical = self.to_continuous(state)
+            for action in Action:
+                next_physical = self.step(physical, action)
                 self.model[state, action] = (
-                    next_state,
-                    self.is_goal(next_pos, next_vel),
+                    self.to_discrete(next_physical),
+                    self.is_goal(next_physical),
                 )
 
     def update(self) -> float:
-        new_values = {}
+        new_values: dict[StateIndices, float] = {}
         for state in self.states:
-            if self.is_goal(*self.to_continuous(state)):
+            if self.is_goal(self.to_continuous(state)):
                 new_values[state] = 0.0
             else:
-                new_values[state] = max(self.q_value(state, a) for a in self.actions)
+                new_values[state] = max(self.q_value(state, a) for a in Action)
 
         delta = max(abs(new_values[s] - self.values[s]) for s in self.states)
         self.values = new_values
         return delta
 
-    def act(self, observation) -> int:
-        return self.best_action(self.to_discrete(observation[0], observation[1]))
+    def act(self, observation) -> Action:
+        physical = PhysicalState((float(observation[0]), float(observation[1])))
+        return self.best_action(self.to_discrete(physical))
 
-    def best_action(self, state: tuple[int, int]) -> int:
-        return max(self.actions, key=lambda a: self.q_value(state, a))
+    def best_action(self, state: StateIndices) -> Action:
+        return max(Action, key=lambda a: self.q_value(state, a))
 
-    def q_value(self, state: tuple[int, int], action: int) -> float:
+    def q_value(self, state: StateIndices, action: Action) -> float:
         next_state, done = self.model[state, action]
         if done:
             return -1.0
         return -1.0 + self.gamma * self.values[next_state]
 
-    def to_continuous(self, state: tuple[int, int]) -> tuple[float, float]:
+    def to_continuous(self, state: StateIndices) -> PhysicalState:
         i, j = state
-        return self.positions[i], self.velocities[j]
+        return PhysicalState((self.positions[i], self.velocities[j]))
 
-    def to_discrete(self, pos: float, vel: float) -> tuple[int, int]:
+    def to_discrete(self, physical: PhysicalState) -> StateIndices:
+        pos, vel = physical
         i = round((pos - self.min_position) / self.position_step)
         j = round((vel + self.max_speed) / self.velocity_step)
-        return i, j
+        return StateIndices((i, j))
 
-    def step(self, pos: float, vel: float, action: int) -> tuple[float, float]:
+    def step(self, physical: PhysicalState, action: Action) -> PhysicalState:
         # Same physics as MountainCarEnv.step
+        pos, vel = physical
+        # action - 1 is the push direction: PUSH_LEFT -1, NO_PUSH 0, PUSH_RIGHT +1
         vel += (action - 1) * self.force - math.cos(3 * pos) * self.gravity
-        vel = min(max(vel, -self.max_speed), self.max_speed)
-        pos = min(max(pos + vel, self.min_position), self.max_position)
+        vel = float(np.clip(vel, -self.max_speed, self.max_speed))
+        pos = float(np.clip(pos + vel, self.min_position, self.max_position))
         if pos == self.min_position and vel < 0:
             vel = 0.0
-        return pos, vel
+        return PhysicalState((pos, vel))
 
-    def is_goal(self, pos: float, vel: float) -> bool:
+    def is_goal(self, physical: PhysicalState) -> bool:
+        pos, vel = physical
         return pos >= self.goal_position and vel >= self.goal_velocity

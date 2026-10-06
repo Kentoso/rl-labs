@@ -3,9 +3,9 @@ from pathlib import Path
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import pygame
-from agent import CarAgent, Episode, TrainingHistory
+from agent import Action, CarAgent, Episode, TrainingHistory
 from matplotlib.colors import ListedColormap
-from value_iteration import ValueIteration
+from value_iteration import StateIndices, ValueIteration
 
 RESULTS_PATH = Path(__file__).with_name("training_results.png")
 
@@ -14,8 +14,16 @@ MUTED = "#898781"
 GRID = "#e1e0d9"
 SERIES = "#2a78d6"
 # Categorical slots for the three actions
-ACTION_COLORS = ["#2a78d6", "#e1e0d9", "#eb6834"]
-ACTION_LABELS = ["Push left", "No push", "Push right"]
+ACTION_COLORS = {
+    Action.PUSH_LEFT: "#2a78d6",
+    Action.NO_PUSH: "#e1e0d9",
+    Action.PUSH_RIGHT: "#eb6834",
+}
+ACTION_LABELS = {
+    Action.PUSH_LEFT: "Push left",
+    Action.NO_PUSH: "No push",
+    Action.PUSH_RIGHT: "Push right",
+}
 
 
 def style_axis(ax: plt.Axes, title: str, xlabel: str, ylabel: str) -> None:
@@ -83,7 +91,10 @@ def plot_results(
     trajectory = episode.states
     # Image rows are velocity bins j, columns are position bins i
     positions, velocities = range(method.n_positions), range(method.n_velocities)
-    policy_grid = [[method.best_action((i, j)) for i in positions] for j in velocities]
+    policy_grid = [
+        [method.best_action(StateIndices((i, j))) for i in positions]
+        for j in velocities
+    ]
 
     ax = axes[1, 1]
     ax.imshow(
@@ -91,13 +102,14 @@ def plot_results(
         origin="lower",
         extent=extent,
         aspect="auto",
-        cmap=ListedColormap(ACTION_COLORS),
+        cmap=ListedColormap([ACTION_COLORS[a] for a in Action]),
         vmin=-0.5,
         vmax=2.5,
         interpolation="nearest",
     )
-    handles = [plt.Rectangle((0, 0), 1, 1, color=c) for c in ACTION_COLORS]
-    ax.legend(handles, ACTION_LABELS, loc="upper left", fontsize=8, frameon=True)
+    handles = [plt.Rectangle((0, 0), 1, 1, color=ACTION_COLORS[a]) for a in Action]
+    labels = [ACTION_LABELS[a] for a in Action]
+    ax.legend(handles, labels, loc="upper left", fontsize=8, frameon=True)
     ax.plot(trajectory[:, 0], trajectory[:, 1], color=INK, linewidth=1.5)
     ax.plot(*trajectory[0], "o", color=INK, markersize=8)
     ax.axvline(method.goal_position, color=INK, linewidth=1, linestyle=":")
@@ -108,8 +120,8 @@ def plot_results(
 
 def print_setup(method: ValueIteration) -> None:
     n_pos, n_vel = method.n_positions, method.n_velocities
-    n_goal = sum(method.is_goal(*method.to_continuous(s)) for s in method.states)
-    n_actions = len(method.actions)
+    n_goal = sum(method.is_goal(method.to_continuous(s)) for s in method.states)
+    n_actions = len(Action)
 
     print("Car physics")
     print(f"  position range     [{method.min_position}, {method.max_position}]")
@@ -124,7 +136,7 @@ def print_setup(method: ValueIteration) -> None:
     )
     print(
         f"  actions ({n_actions})        "
-        + ", ".join(f"{a} = {label}" for a, label in enumerate(ACTION_LABELS))
+        + ", ".join(f"{a.value} = {a.name}" for a in Action)
     )
     print("  reward             -1 per step until the goal")
     print("Value iteration")
