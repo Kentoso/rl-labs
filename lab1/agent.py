@@ -61,7 +61,7 @@ class CarAgent:
                 history.eval_returns.append(mean_return)
                 history.eval_success_rates.append(success_rate)
                 print(
-                    f"iter {iteration:4d}  delta {delta:.2e}  "
+                    f"iter {iteration:4d}  change {delta:<8.4g}  "
                     f"return {mean_return:7.1f}  success {success_rate:.0%}"
                 )
             if converged:

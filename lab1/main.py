@@ -1,11 +1,14 @@
+import argparse
 from pathlib import Path
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import pygame
 from agent import Action, CarAgent, Episode, TrainingHistory
+from discrete_car import DiscreteCar, StateIndices
 from matplotlib.colors import ListedColormap
-from value_iteration import StateIndices, ValueIteration
+from policy_iteration import PolicyIteration
+from value_iteration import ValueIteration
 
 RESULTS_PATH = Path(__file__).with_name("training_results.png")
 
@@ -44,16 +47,20 @@ def plot_line(ax: plt.Axes, x, y, **kwargs) -> None:
 
 
 def plot_results(
-    history: TrainingHistory, method: ValueIteration, episode: Episode
+    history: TrainingHistory, method: DiscreteCar, episode: Episode
 ) -> plt.Figure:
     fig, axes = plt.subplots(2, 2, figsize=(12, 9), layout="constrained")
     fig.suptitle(
-        "MountainCar · value iteration", x=0.01, ha="left", fontsize=14, color=INK
+        f"MountainCar · {method.title.lower()}",
+        x=0.01,
+        ha="left",
+        fontsize=14,
+        color=INK,
     )
 
     ax = axes[0, 0]
     plot_line(ax, range(1, len(history.deltas) + 1), history.deltas)
-    style_axis(ax, "Bellman residual", "Iteration", "max |V' − V|")
+    style_axis(ax, method.change_label, "Iteration", method.change_label)
 
     ax = axes[0, 1]
     plot_line(
@@ -92,7 +99,7 @@ def plot_results(
     # Image rows are velocity bins j, columns are position bins i
     positions, velocities = range(method.n_positions), range(method.n_velocities)
     policy_grid = [
-        [method.best_action(StateIndices((i, j))) for i in positions]
+        [method.policy_action(StateIndices((i, j))) for i in positions]
         for j in velocities
     ]
 
@@ -118,7 +125,7 @@ def plot_results(
     return fig
 
 
-def print_setup(method: ValueIteration) -> None:
+def print_setup(method: DiscreteCar) -> None:
     n_pos, n_vel = method.n_positions, method.n_velocities
     n_goal = sum(method.is_goal(method.to_continuous(s)) for s in method.states)
     n_actions = len(Action)
@@ -139,7 +146,7 @@ def print_setup(method: ValueIteration) -> None:
         + ", ".join(f"{a.value} = {a.name}" for a in Action)
     )
     print("  reward             -1 per step until the goal")
-    print("Value iteration")
+    print(method.title)
     print(f"  position bins      {n_pos} (step {method.position_step:.4f})")
     print(f"  velocity bins      {n_vel} (step {method.velocity_step:.5f})")
     print(
@@ -148,6 +155,9 @@ def print_setup(method: ValueIteration) -> None:
     print(f"  state-action pairs {n_pos * n_vel * n_actions}")
     print("  next state         snapped to the nearest grid cell")
     print(f"  discount (gamma)   {method.gamma}")
+    if isinstance(method, PolicyIteration):
+        print(f"  evaluation theta   {method.theta}")
+        print("  initial policy     NO_PUSH everywhere")
     print()
 
 
@@ -164,12 +174,23 @@ def watch_episode(agent: CarAgent, seed: int) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--method", choices=["value", "policy"], default="value")
+    args = parser.parse_args()
+
     env = gym.make("MountainCar-v0")
-    method = ValueIteration(env)
+    method: DiscreteCar
+    if args.method == "policy":
+        method = PolicyIteration(env)
+        # Each policy iteration step is expensive and big, so evaluate after every one
+        eval_every = 1
+    else:
+        method = ValueIteration(env)
+        eval_every = 25
     agent = CarAgent(env, method)
     print_setup(method)
 
-    history = agent.train()
+    history = agent.train(eval_every=eval_every)
 
     episode = agent.run_episode(env, seed=1234)
     print(
