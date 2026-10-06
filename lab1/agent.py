@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Protocol
@@ -48,11 +49,14 @@ class CarAgent:
         tolerance: float = 1e-4,
         eval_every: int = 25,
         eval_episodes: int = 20,
+        on_iteration: Callable[[int], None] | None = None,
     ) -> TrainingHistory:
         history = TrainingHistory()
         for iteration in range(1, max_iterations + 1):
             delta = self.method.update()
             history.deltas.append(delta)
+            if on_iteration is not None:
+                on_iteration(iteration)
 
             converged = delta < tolerance
             if iteration % eval_every == 0 or converged:

@@ -7,15 +7,19 @@ import pygame
 from agent import Action, CarAgent, Episode, TrainingHistory
 from discrete_car import DiscreteCar, StateIndices
 from matplotlib.colors import ListedColormap
+from matplotlib.figure import Figure
 from policy_iteration import PolicyIteration
 from value_iteration import ValueIteration
 
 RESULTS_PATH = Path(__file__).with_name("training_results.png")
+POLICY_MAPS_DIR = Path(__file__).with_name("policy_maps")
+SNAPSHOT_EVERY = 10
 
 INK = "#0b0b0b"
 MUTED = "#898781"
 GRID = "#e1e0d9"
 SERIES = "#2a78d6"
+GOAL = "#1f9d55"
 # Categorical slots for the three actions
 ACTION_COLORS = {
     Action.PUSH_LEFT: "#2a78d6",
@@ -89,21 +93,29 @@ def plot_results(
         "Episodes reaching the flag (%)",
     )
 
-    extent = [
+    ax = axes[1, 1]
+    plot_policy_map(ax, method)
+    trajectory = episode.states
+    ax.plot(trajectory[:, 0], trajectory[:, 1], color=INK, linewidth=1.5)
+    ax.plot(*trajectory[0], "o", color=INK, markersize=8)
+    style_axis(ax, "Greedy policy + sample trajectory", "Position", "Velocity")
+
+    return fig
+
+
+def plot_policy_map(ax: plt.Axes, method: DiscreteCar) -> None:
+    extent = (
         method.min_position,
         method.max_position,
         -method.max_speed,
         method.max_speed,
-    ]
-    trajectory = episode.states
+    )
     # Image rows are velocity bins j, columns are position bins i
     positions, velocities = range(method.n_positions), range(method.n_velocities)
     policy_grid = [
         [method.policy_action(StateIndices((i, j))) for i in positions]
         for j in velocities
     ]
-
-    ax = axes[1, 1]
     ax.imshow(
         policy_grid,
         origin="lower",
@@ -114,15 +126,40 @@ def plot_results(
         vmax=2.5,
         interpolation="nearest",
     )
+    # Goal zone: position >= goal_position and velocity >= goal_velocity
+    goal = plt.Rectangle(
+        (method.goal_position, method.goal_velocity),
+        method.max_position - method.goal_position,
+        method.max_speed - method.goal_velocity,
+        fill=False,
+        edgecolor=GOAL,
+        linewidth=2.5,
+        # The zone touches the top-right corner, so don't cut its edges at the axes border
+        clip_on=False,
+    )
+    ax.add_patch(goal)
+
     handles = [plt.Rectangle((0, 0), 1, 1, color=ACTION_COLORS[a]) for a in Action]
     labels = [ACTION_LABELS[a] for a in Action]
+    handles.append(plt.Rectangle((0, 0), 1, 1, fill=False, edgecolor=GOAL, linewidth=2))
+    labels.append("Goal zone")
     ax.legend(handles, labels, loc="upper left", fontsize=8, frameon=True)
-    ax.plot(trajectory[:, 0], trajectory[:, 1], color=INK, linewidth=1.5)
-    ax.plot(*trajectory[0], "o", color=INK, markersize=8)
-    ax.axvline(method.goal_position, color=INK, linewidth=1, linestyle=":")
-    style_axis(ax, "Greedy policy + sample trajectory", "Position", "Velocity")
 
-    return fig
+
+def save_policy_map(method: DiscreteCar, iteration: int, folder: Path) -> None:
+    # A plain Figure only renders to a file. plt.subplots would start the GUI backend,
+    # which breaks the pygame demo window that opens later.
+    fig = Figure(figsize=(6, 4.5), layout="constrained")
+    ax = fig.subplots()
+    plot_policy_map(ax, method)
+    when = f"policy after iteration {iteration}" if iteration > 0 else "initial policy"
+    style_axis(
+        ax,
+        f"{method.title} · {when}",
+        "Position",
+        "Velocity",
+    )
+    fig.savefig(folder / f"iter_{iteration:04d}.png", dpi=100)
 
 
 def print_setup(method: DiscreteCar) -> None:
@@ -190,7 +227,22 @@ def main() -> None:
     agent = CarAgent(env, method)
     print_setup(method)
 
-    history = agent.train(eval_every=eval_every)
+    # One folder per method; old snapshots are removed so a shorter run leaves no leftovers
+    snapshots = POLICY_MAPS_DIR / args.method
+    snapshots.mkdir(parents=True, exist_ok=True)
+    for old in snapshots.glob("iter_*.png"):
+        old.unlink()
+
+    def snapshot(iteration: int) -> None:
+        if iteration % SNAPSHOT_EVERY == 0:
+            save_policy_map(method, iteration, snapshots)
+
+    # Iteration 0 is the policy before any training
+    save_policy_map(method, 0, snapshots)
+    history = agent.train(eval_every=eval_every, on_iteration=snapshot)
+    # Also keep the final policy
+    save_policy_map(method, len(history.deltas), snapshots)
+    print(f"Saved policy maps to {snapshots}")
 
     episode = agent.run_episode(env, seed=1234)
     print(
