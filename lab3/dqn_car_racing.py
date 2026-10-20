@@ -4,8 +4,8 @@ Environment: https://gymnasium.farama.org/environments/box2d/car_racing/
 
 Observations are 96x96x3 RGB frames. We convert to grayscale, resize to
 84x84 and stack 4 consecutive frames so the network can perceive motion.
-The discrete action space has 5 actions: do-nothing, steer-left,
-steer-right, gas, brake.
+The discrete action space has 5 actions: do-nothing, steer-right,
+steer-left, gas, brake.
 """
 
 from collections import deque
@@ -91,36 +91,42 @@ class QNetwork(nn.Module):
 
 
 class ReplayBuffer:
-    """Preallocated ring buffer. Frames stay uint8 to cut memory and
-    host->GPU transfer 4x; the network casts to float on device."""
+    """Preallocated ring buffer kept on the training device. Frames stay
+    uint8 to cut memory 4x; the network casts to float on device. With
+    unified memory (Apple silicon) the buffer is plain RAM, so sampling
+    indexes it in place instead of copying a batch per update."""
 
     def __init__(self, capacity, obs_shape):
         self.capacity = capacity
-        self.states = np.zeros((capacity, *obs_shape), dtype=np.uint8)
-        self.next_states = np.zeros((capacity, *obs_shape), dtype=np.uint8)
-        self.actions = np.zeros(capacity, dtype=np.int64)
-        self.rewards = np.zeros(capacity, dtype=np.float32)
-        self.dones = np.zeros(capacity, dtype=np.float32)
+        self.states = torch.zeros((capacity, *obs_shape), dtype=torch.uint8, device=device)
+        self.next_states = torch.zeros((capacity, *obs_shape), dtype=torch.uint8, device=device)
+        self.actions = torch.zeros(capacity, dtype=torch.int64, device=device)
+        self.rewards = torch.zeros(capacity, dtype=torch.float32, device=device)
+        self.dones = torch.zeros(capacity, dtype=torch.float32, device=device)
         self.pos = 0
         self.size = 0
 
-    def push(self, state, action, reward, next_state, done):
-        i = self.pos
-        self.states[i] = state
-        self.next_states[i] = next_state
-        self.actions[i] = action
-        self.rewards[i] = reward
-        self.dones[i] = done
-        self.pos = (self.pos + 1) % self.capacity
-        self.size = min(self.size + 1, self.capacity)
+    def push(self, states, actions, rewards, next_states, dones):
+        """Store a batch of transitions (one per env) with one copy each."""
+        n = len(actions)
+        if n == 0:
+            return
+        idx = torch.arange(self.pos, self.pos + n, device=device) % self.capacity
+        self.states[idx] = torch.from_numpy(np.ascontiguousarray(states, dtype=np.uint8)).to(device)
+        self.next_states[idx] = torch.from_numpy(np.ascontiguousarray(next_states, dtype=np.uint8)).to(device)
+        self.actions[idx] = torch.from_numpy(np.ascontiguousarray(actions, dtype=np.int64)).to(device)
+        self.rewards[idx] = torch.from_numpy(np.ascontiguousarray(rewards, dtype=np.float32)).to(device)
+        self.dones[idx] = torch.from_numpy(np.ascontiguousarray(dones, dtype=np.float32)).to(device)
+        self.pos = (self.pos + n) % self.capacity
+        self.size = min(self.size + n, self.capacity)
 
     def sample(self, batch_size):
-        idx = np.random.randint(0, self.size, size=batch_size)
-        states = torch.from_numpy(self.states[idx]).to(device, non_blocking=True)
-        next_states = torch.from_numpy(self.next_states[idx]).to(device, non_blocking=True)
-        actions = torch.from_numpy(self.actions[idx]).to(device).unsqueeze(1)
-        rewards = torch.from_numpy(self.rewards[idx]).to(device).unsqueeze(1)
-        dones = torch.from_numpy(self.dones[idx]).to(device).unsqueeze(1)
+        idx = torch.randint(0, self.size, (batch_size,), device=device)
+        states = self.states[idx]
+        next_states = self.next_states[idx]
+        actions = self.actions[idx].unsqueeze(1)
+        rewards = self.rewards[idx].unsqueeze(1)
+        dones = self.dones[idx].unsqueeze(1)
         return states, actions, rewards, next_states, dones
 
     def __len__(self):
@@ -130,7 +136,7 @@ class ReplayBuffer:
 class DQNAgent:
     def __init__(self, action_dim, obs_shape, lr=1e-4, gamma=0.99, epsilon=1.0,
                  epsilon_min=0.05, epsilon_decay=0.995, buffer_size=50000,
-                 batch_size=128, target_update=1000):
+                 batch_size=128, target_update=1000, double_dqn=True):
         self.action_dim = action_dim
         self.gamma = gamma
         self.epsilon = epsilon
@@ -138,6 +144,7 @@ class DQNAgent:
         self.epsilon_decay = epsilon_decay
         self.batch_size = batch_size
         self.target_update = target_update
+        self.double_dqn = double_dqn
 
         self.model = QNetwork(a_size=action_dim).to(device)
         self.target_model = QNetwork(a_size=action_dim).to(device)
@@ -147,8 +154,8 @@ class DQNAgent:
         self.scaler = torch.amp.GradScaler(device.type, enabled=device.type == "cuda")
         self.learn_steps = 0
 
-    def remember(self, state, action, reward, next_state, done):
-        self.memory.push(state, action, reward, next_state, done)
+    def remember(self, states, actions, rewards, next_states, dones):
+        self.memory.push(states, actions, rewards, next_states, dones)
 
     def replay(self):
         if len(self.memory) < self.batch_size:
@@ -159,7 +166,12 @@ class DQNAgent:
         with torch.autocast(device.type, enabled=device.type == "cuda"):
             q_values = self.model(states).gather(1, actions)
             with torch.no_grad():
-                next_q = self.target_model(next_states).max(1, keepdim=True)[0]
+                if self.double_dqn:
+                    # Double DQN: online net picks the next action, target net scores it
+                    next_actions = self.model(next_states).argmax(1, keepdim=True)
+                    next_q = self.target_model(next_states).gather(1, next_actions)
+                else:
+                    next_q = self.target_model(next_states).max(1, keepdim=True)[0]
                 target = rewards + self.gamma * next_q * (1 - dones)
             loss = F.smooth_l1_loss(q_values, target)
 
@@ -203,10 +215,13 @@ def train(num_envs=8, n_episodes=1000, updates_per_step=2, validate_every=50):
         next_states, rewards, terminations, truncations, _ = env.step(actions)
         dones = np.logical_or(terminations, truncations)
 
+        # autoreset step: next_states[i] is a fresh episode start, don't store it
+        keep = ~prev_done
+        agent.remember(states[keep], actions[keep], rewards[keep], next_states[keep], dones[keep])
+
         for i in range(num_envs):
             if prev_done[i]:
-                continue  # autoreset step: next_states[i] is a fresh episode start
-            agent.remember(states[i], actions[i], rewards[i], next_states[i], dones[i])
+                continue
             episode_rewards[i] += rewards[i]
             if dones[i]:
                 score = episode_rewards[i]
