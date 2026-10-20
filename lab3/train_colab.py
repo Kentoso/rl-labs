@@ -75,10 +75,11 @@ if dqn.device.type == "cuda":
 # %% [markdown]
 # ## Config
 #
-# Envs are stepped in CPU subprocesses, so `num_envs` defaults to the CPU count. Watch
-# `ms_env_wait` vs `ms_update` in `updates.csv`: if the loop mostly waits for the envs,
-# the GPU has room for more `updates_per_step` (note: changing `num_envs` or
-# `updates_per_step` also changes how often each transition is replayed).
+# Envs are stepped in CPU subprocesses, so `num_envs` defaults to the CPU count.
+# `replay_ratio` is gradient updates per stored transition; the updates per loop
+# iteration are derived from it (12 envs × 0.25 = 3), so runs with different `num_envs`
+# stay comparable. Watch `ms_env_wait` vs `ms_update` in `updates.csv` to see whether
+# the loop waits for the envs (CPU) or the updates (GPU).
 
 # %% tags=["parameters"]
 cfg = dqn.Config(
@@ -87,7 +88,7 @@ cfg = dqn.Config(
     seed=0,
     num_envs=os.cpu_count(),
     n_episodes=1000,
-    updates_per_step=2,
+    replay_ratio=0.25,
     lr=1e-4,
     gamma=0.99,
     batch_size=128,

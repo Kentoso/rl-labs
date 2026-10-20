@@ -212,6 +212,17 @@ training avg −55 → −32, i.e. the agent isn't driving yet):
 checkpoint by greedy performance (what `test_car_racing.py` measures) rather than by the
 ε-greedy training average; train on a Colab GPU.
 
+## 2026-10-20 — Replay ratio instead of fixed updates per step (uncommitted)
+
+**What:** `Config.updates_per_step` → `Config.replay_ratio` (gradient updates per stored
+transition, default 0.25). Each loop iteration earns `replay_ratio × transitions stored`
+updates; the fractional part carries over (10 envs: 2, 3, 2, 3, …).
+
+**Why:** The first Colab run used 12 envs (= CPU count) with the fixed 2 updates per
+step: 2/12 ≈ 0.17 updates per transition vs the baseline's 2/8 = 0.25, i.e. ~167k
+instead of ~250k updates over 1000 episodes. Fixing the ratio keeps runs comparable
+whatever `num_envs` the machine allows (12 envs → 3 updates per step).
+
 ---
 
 ## Investigated, not adopted

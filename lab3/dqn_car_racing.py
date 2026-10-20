@@ -170,7 +170,10 @@ class Config:
     # data collection
     num_envs: int = 8
     n_episodes: int = 1000
-    updates_per_step: int = 2
+    # gradient updates per stored transition; the updates per loop iteration
+    # follow from it (0.25 = the baseline's 2 updates per step with 8 envs), so
+    # changing num_envs doesn't change how often each transition is replayed
+    replay_ratio: float = 0.25
     # DQN
     lr: float = 1e-4
     gamma: float = 0.99
@@ -456,7 +459,8 @@ def train(cfg=None):
 
     log = RunLog(cfg)
     log.save_json("config.json", {"config": asdict(cfg), "env": environment_info()})
-    print(f"Run dir: {log.dir}  (device {device}, {cfg.num_envs} envs)")
+    print(f"Run dir: {log.dir}  (device {device}, {cfg.num_envs} envs, "
+          f"{cfg.replay_ratio * cfg.num_envs:g} updates per step)")
 
     env = make_vec_env(cfg.num_envs)
     eval_env = make_vec_env(cfg.eval_episodes)
@@ -473,6 +477,7 @@ def train(cfg=None):
     prev_done = np.zeros(cfg.num_envs, dtype=bool)
     completed = 0
     env_steps = 0
+    update_credit = 0.0  # fractional updates carried over between iterations
     n_evals = 0
     last_eval_at = None
     t_start = time.time()
@@ -508,8 +513,14 @@ def train(cfg=None):
         t0 = time.time()
         actions, max_q = agent.model.act_batch(states, epsilon=agent.epsilon, return_q=True)
         t1 = time.time()
+        # autoreset step: next_states[i] will be a fresh episode start, so env i's
+        # transition isn't stored this iteration and earns no updates
+        keep = ~prev_done
+        update_credit += cfg.replay_ratio * keep.sum()
+        n_updates = int(update_credit)
+        update_credit -= n_updates
         env.step_async(actions)
-        for _ in range(cfg.updates_per_step):
+        for _ in range(n_updates):
             agent.replay()
         t2 = time.time()
         next_states, rewards, terminations, truncations, info = env.step_wait()
@@ -520,8 +531,6 @@ def train(cfg=None):
         last_log["loops"] += 1
         dones = np.logical_or(terminations, truncations)
 
-        # autoreset step: next_states[i] is a fresh episode start, don't store it
-        keep = ~prev_done
         agent.remember(states[keep], actions[keep], rewards[keep], next_states[keep], dones[keep])
         env_steps += int(keep.sum())
 
