@@ -225,6 +225,71 @@ whatever `num_envs` the machine allows (12 envs → 3 updates per step).
 
 ---
 
+## 2026-10-20 — Run 1 on Colab L4: `ddqn_rs0.1` (`a5f2758`, 1008 episodes, 51 min)
+
+Config: defaults above, 12 envs, replay ratio 0.25 → 1.0M env steps, 252k updates.
+
+| Greedy eval (10 fixed tracks) | ep 360 | ep 504 | ep 756 | ep 1008 (best) |
+|---|---|---|---|---|
+| mean score | 151 | 311 | 502 | **541 ± 108** |
+
+`test_car_racing.py best.pth 50` (unchanged test, run locally on MPS): **mean 577.0,
+std 92.8, min 276.5, max 728.5**, vs the baseline's 840.6 / 103.2 / 470.4 / 912.7.
+
+Training avg100 at the end: 503, still rising ~40 per 100 episodes. **Not converged**,
+and well below the baseline checkpoint (840).
+
+Findings:
+- All but 3 of 1008 training episodes end on the 1000-step timeout; the car never
+  finishes a lap and covers ~60% of the track. The limit is speed: gas is a 0.2-throttle
+  action, and the agent still picks noop ~15% of the time.
+- Q is calibrated: eval `q_start` 40.4 vs actual discounted return 44.3 (raw units).
+  No overestimation, so Double DQN is doing its job. Q still grows each block, which
+  means values are still propagating.
+- |TD| ≥ 1 (scaled) stays ≤ 0.1% and the max grad norm is 0.79 vs the 10.0 clip: **clipping
+  never triggered**. Huber stays in its quadratic part, so it's effectively MSE here.
+- `nonfinite_grads` ≈ 0.2 per 500 updates: GradScaler skipping overflow steps, which is normal.
+- Throughput is **GPU-loop bound**: `ms_update` 28 ms per iteration (3 updates, ~9.5 ms
+  each) vs `ms_env_wait` 0.9 ms. 9.5 ms per update is slow for an L4; the likely suspect
+  is 12 env worker processes on 12 vCPUs starving the main process that launches kernels.
+
+## 2026-10-20 — Faster experiments: no-progress cut, per-step ε, true terminals (uncommitted)
+
+Run 1 took 51 minutes and still wasn't converged, which is too slow to try ideas. Every
+piece below is a `Config` flag, so it can be switched off for comparison.
+
+- **No-progress truncation** (`no_progress_steps=100`): the `NoProgressTruncation`
+  wrapper, applied in `make_vec_env` for training envs only, truncates an episode after
+  100 frames without a new tile. Detection: a new tile gives +1000/N − 0.1 > 0 and every
+  other frame gives −0.1 or −100, so `reward > 0` ⇔ new tile. Measured before choosing
+  100: driving on track with gas, a new tile comes at least every 12 frames; a random
+  policy dithers on track with gaps up to 114–139 frames. 50 would cut the early random
+  episodes too soon after reset. With random actions, episodes now end at 142–527
+  frames instead of 1000. `make_env`, evals and `test_car_racing.py` are unchanged and
+  run full episodes. New end reason in `episodes.csv`: `no_progress`.
+- **Truncation bootstraps** (`bootstrap_truncation=True`): the buffer used to store
+  `terminated or truncated` as done, so the 1000-step timeout (99.7% of run 1's episodes)
+  set the target to r alone, "no future value", for a state the agent can't tell is near
+  the time limit. Now only real terminals (off playfield, lap finished) zero the
+  bootstrap. The no-progress cut is a truncation, so it bootstraps too; otherwise it
+  would teach the same wrong "the world ends here".
+- **ε decays linearly per env step** (`epsilon_decay_steps=150_000`): 1.0 → 0.05 over
+  150k steps. Per-episode 0.995 decay kept run 1 mostly random until episode ~600, and
+  would tie ε to episode length now that episodes vary.
+- **Budget and evals in env steps** (`total_env_steps`, `eval_every_steps=50_000`;
+  `n_episodes` is now optional): with variable-length episodes, episode counts no longer
+  measure training. Eval checkpoints are named `step<N>k.pth`; `evals.csv` gains `env_steps`.
+- **Batch 256, replay ratio 0.125, target_update 500**: the same samples per transition
+  (0.125 × 256 = 0.25 × 128) with half the update launches. `target_update` counts
+  updates, so it's halved to keep the sync at 4000 transitions. Untested: half as many
+  optimizer steps at the same lr may learn slower per sample.
+- **Colab: `num_envs = cpu_count − 2`**: tests the hypothesis that run 1 was slow because
+  12 env workers on 12 vCPUs starved the process that launches GPU work.
+
+Training scores and `avg100` are now from possibly cut episodes, so they're lower than
+full-episode scores. Compare runs by eval scores. Plan: one 300k-step screening run
+(notebook default), compared against run 1's eval at the same step count.
+
 ## Investigated, not adopted
 
 ### Mixed precision on MPS

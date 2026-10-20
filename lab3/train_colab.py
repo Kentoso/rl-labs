@@ -75,33 +75,41 @@ if dqn.device.type == "cuda":
 # %% [markdown]
 # ## Config
 #
-# Envs are stepped in CPU subprocesses, so `num_envs` defaults to the CPU count.
+# Envs are stepped in CPU subprocesses. `num_envs` leaves 2 CPUs free for the main
+# process, which launches the GPU work (run 1 used all 12 and was update-bound).
 # `replay_ratio` is gradient updates per stored transition; the updates per loop
-# iteration are derived from it (12 envs × 0.25 = 3), so runs with different `num_envs`
-# stay comparable. Watch `ms_env_wait` vs `ms_update` in `updates.csv` to see whether
-# the loop waits for the envs (CPU) or the updates (GPU).
+# iteration are derived from it, so runs with different `num_envs` stay comparable.
+# Watch `ms_env_wait` vs `ms_update` in `updates.csv` to see whether the loop waits
+# for the envs (CPU) or the updates (GPU).
+#
+# The budget is in env steps: 300k is a screening run. Run 1 (`a5f2758`, baseline-style
+# settings) had an eval mean below 0 at that point.
 
 # %% tags=["parameters"]
 cfg = dqn.Config(
-    run_name="ddqn_rs0.1",
+    run_name="screen_fast",
     out_dir=OUT_DIR,
     seed=0,
-    num_envs=os.cpu_count(),
-    n_episodes=1000,
-    replay_ratio=0.25,
+    num_envs=max(os.cpu_count() - 2, 1),
+    n_episodes=None,
+    total_env_steps=300_000,
+    no_progress_steps=100,  # None = full 1000-frame training episodes
+    bootstrap_truncation=True,  # False = timeouts stored as terminal (baseline)
+    replay_ratio=0.125,
     lr=1e-4,
     gamma=0.99,
-    batch_size=128,
+    batch_size=256,
     buffer_size=50_000,
-    target_update=1000,
+    target_update=500,  # gradient updates
     double_dqn=True,
     reward_scale=0.1,
     max_grad_norm=10.0,  # None disables clipping
     epsilon_start=1.0,
     epsilon_min=0.05,
+    epsilon_decay_steps=150_000,  # None = per-episode decay by epsilon_decay
     epsilon_decay=0.995,
     log_every_updates=500,
-    eval_every=50,
+    eval_every_steps=50_000,
     eval_episodes=10,
     eval_seed=10_000,
 )

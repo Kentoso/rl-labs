@@ -54,9 +54,39 @@ def make_env(render_mode=None):
     return env
 
 
-def make_vec_env(num_envs):
+class NoProgressTruncation(gym.Wrapper):
+    """Truncate an episode after `patience` frames without a new track tile.
+
+    A frame that reaches a new tile earns +1000/N - 0.1 > 0; every other frame
+    earns -0.1 (or -100 when leaving the playfield), so reward > 0 marks a new
+    tile. Training-only: it saves the frames a car spends stuck on the grass.
+    Tests and evals keep running full episodes.
+    """
+
+    def __init__(self, env, patience):
+        super().__init__(env)
+        self.patience = patience
+        self.since_tile = 0
+
+    def reset(self, **kwargs):
+        self.since_tile = 0
+        return self.env.reset(**kwargs)
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        self.since_tile = 0 if reward > 0 else self.since_tile + 1
+        if self.since_tile >= self.patience and not (terminated or truncated):
+            truncated = True
+            info["no_progress"] = True
+        return obs, reward, terminated, truncated, info
+
+
+def make_vec_env(num_envs, no_progress_steps=None):
     """Several CarRacing instances stepped in parallel subprocesses."""
-    return gym.vector.AsyncVectorEnv([make_env for _ in range(num_envs)])
+    if no_progress_steps is None:
+        return gym.vector.AsyncVectorEnv([make_env for _ in range(num_envs)])
+    return gym.vector.AsyncVectorEnv(
+        [lambda: NoProgressTruncation(make_env(), no_progress_steps) for _ in range(num_envs)])
 
 
 class QNetwork(nn.Module):
@@ -169,28 +199,38 @@ class Config:
     seed: int = 0
     # data collection
     num_envs: int = 8
-    n_episodes: int = 1000
+    # training stops at whichever budget runs out first (None = no limit)
+    n_episodes: int | None = None
+    total_env_steps: int | None = 1_000_000
+    # truncate a training episode after this many frames without a new tile
+    # (None = full 1000-frame episodes, as in the baseline)
+    no_progress_steps: int | None = 100
+    # store only real terminals (off playfield, lap done) as done; timeouts and
+    # no-progress cuts bootstrap from the next state. False = baseline behaviour
+    bootstrap_truncation: bool = True
     # gradient updates per stored transition; the updates per loop iteration
     # follow from it (0.25 = the baseline's 2 updates per step with 8 envs), so
     # changing num_envs doesn't change how often each transition is replayed
-    replay_ratio: float = 0.25
+    replay_ratio: float = 0.125
     # DQN
     lr: float = 1e-4
     gamma: float = 0.99
-    batch_size: int = 128
+    batch_size: int = 256
     buffer_size: int = 50_000
-    target_update: int = 1000
+    target_update: int = 500  # in gradient updates (500 x 256 / 0.125 = 4000 transitions)
     double_dqn: bool = True
     reward_scale: float = 0.1
     max_grad_norm: float | None = 10.0  # None disables clipping
-    # exploration, decayed once per finished episode
+    # exploration: linear decay over epsilon_decay_steps env steps, or, when
+    # that is None, multiplied by epsilon_decay once per finished episode
     epsilon_start: float = 1.0
     epsilon_min: float = 0.05
+    epsilon_decay_steps: int | None = 150_000
     epsilon_decay: float = 0.995
     # logging and evaluation
     log_every_updates: int = 500
     grad_norm_every: int = 50  # without clipping, measure the norm every N updates
-    eval_every: int = 50  # episodes between greedy evaluations
+    eval_every_steps: int = 50_000  # env steps between greedy evaluations
     eval_episodes: int = 10
     eval_seed: int = 10_000  # eval tracks: eval_seed .. eval_seed + eval_episodes - 1
 
@@ -304,7 +344,13 @@ class DQNAgent:
             self.target_model.load_state_dict(self.model.state_dict())
 
     def decay_epsilon(self):
+        """Per-episode multiplicative decay (used when epsilon_decay_steps is None)."""
         self.epsilon = max(self.cfg.epsilon_min, self.epsilon * self.cfg.epsilon_decay)
+
+    def set_epsilon_by_steps(self, env_steps):
+        cfg = self.cfg
+        frac = min(env_steps / cfg.epsilon_decay_steps, 1.0)
+        self.epsilon = cfg.epsilon_start + frac * (cfg.epsilon_min - cfg.epsilon_start)
 
 
 class EpisodeTracker:
@@ -337,7 +383,13 @@ class EpisodeTracker:
         """Row describing the finished episode of env i; resets its counters."""
         lap = bool(info.get("_lap_finished", np.zeros(i + 1, bool))[i]
                    and info["lap_finished"][i])
-        end = "lap" if lap else ("off_playfield" if terminated else "timeout")
+        no_progress = bool(info.get("_no_progress", np.zeros(i + 1, bool))[i])
+        if lap:
+            end = "lap"
+        elif terminated:
+            end = "off_playfield"
+        else:
+            end = "no_progress" if no_progress else "timeout"
         length = int(self.length[i])
         row = {
             "score": float(self.ret[i]),
@@ -451,7 +503,10 @@ def train(cfg=None):
                     grad norms, throughput and where the time goes
       evals.csv     one row per greedy eval episode on fixed tracks
       checkpoints/  best.pth (best eval mean), best_train_avg.pth (old
-                    criterion), last.pth, ep<N>.pth at every eval
+                    criterion), last.pth, step<N>k.pth at every eval
+
+    Training episodes may be cut short (no_progress_steps), so their scores
+    and avg100 underestimate full-episode scores; evals always run full episodes.
     """
     cfg = cfg or Config()
     np.random.seed(cfg.seed)
@@ -462,7 +517,7 @@ def train(cfg=None):
     print(f"Run dir: {log.dir}  (device {device}, {cfg.num_envs} envs, "
           f"{cfg.replay_ratio * cfg.num_envs:g} updates per step)")
 
-    env = make_vec_env(cfg.num_envs)
+    env = make_vec_env(cfg.num_envs, cfg.no_progress_steps)
     eval_env = make_vec_env(cfg.eval_episodes)
     eval_seeds = np.arange(cfg.eval_seed, cfg.eval_seed + cfg.eval_episodes)
     agent = DQNAgent(env.single_action_space.n, env.single_observation_space.shape, cfg)
@@ -488,28 +543,35 @@ def train(cfg=None):
 
     def run_eval():
         nonlocal n_evals, last_eval_at
-        last_eval_at = completed
+        last_eval_at = env_steps
         t0 = time.time()
         rows = evaluate(agent.model, eval_env, eval_seeds, cfg.gamma, cfg.reward_scale)
         n_evals += 1
         for r in rows:
-            log.write("evals", {"eval": n_evals, "episode": completed,
+            log.write("evals", {"eval": n_evals, "episode": completed, "env_steps": env_steps,
                                 "learn_steps": agent.learn_steps, **r})
         scores = np.array([r["score"] for r in rows])
         laps = sum(r["end"] == "lap" for r in rows)
-        log.save_model(agent.model, f"ep{completed:05d}.pth")
+        log.save_model(agent.model, f"step{env_steps // 1000:05d}k.pth")
         tag = ""
         if scores.mean() > best_eval["mean"]:
             best_eval.update(mean=float(scores.mean()), std=float(scores.std()),
-                             episode=completed)
+                             episode=completed, env_steps=env_steps)
             log.save_model(agent.model, "best.pth")
             tag = "  * new best"
-        print(f"  Eval @ episode {completed}: mean {scores.mean():.1f} std {scores.std():.1f} "
+        print(f"  Eval @ {env_steps} steps (episode {completed}): "
+              f"mean {scores.mean():.1f} std {scores.std():.1f} "
               f"min {scores.min():.1f} max {scores.max():.1f} laps {laps}/{len(rows)} "
               f"({time.time() - t0:.0f}s){tag}")
         return scores
 
-    while completed < cfg.n_episodes:
+    def budget_left():
+        return ((cfg.n_episodes is None or completed < cfg.n_episodes)
+                and (cfg.total_env_steps is None or env_steps < cfg.total_env_steps))
+
+    while budget_left():
+        if cfg.epsilon_decay_steps is not None:
+            agent.set_epsilon_by_steps(env_steps)
         t0 = time.time()
         actions, max_q = agent.model.act_batch(states, epsilon=agent.epsilon, return_q=True)
         t1 = time.time()
@@ -530,8 +592,12 @@ def train(cfg=None):
         timing["env_wait"] += t3 - t2
         last_log["loops"] += 1
         dones = np.logical_or(terminations, truncations)
+        # a truncated episode didn't end in the MDP, so its target still
+        # bootstraps from the next state; only real terminals zero it
+        stored_dones = terminations if cfg.bootstrap_truncation else dones
 
-        agent.remember(states[keep], actions[keep], rewards[keep], next_states[keep], dones[keep])
+        agent.remember(states[keep], actions[keep], rewards[keep], next_states[keep],
+                       stored_dones[keep])
         env_steps += int(keep.sum())
 
         for i in np.flatnonzero(keep):
@@ -547,7 +613,8 @@ def train(cfg=None):
                 "learn_steps": agent.learn_steps, "wall_s": round(time.time() - t_start, 2),
                 "epsilon": agent.epsilon, **row, "avg100": avg,
             })
-            agent.decay_epsilon()
+            if cfg.epsilon_decay_steps is None:
+                agent.decay_epsilon()
             print(f"Episode {completed}\tScore {row['score']:.1f}\tAvg {avg:.1f}\t"
                   f"Eps {agent.epsilon:.3f}\tLen {row['length']}\t{row['end']}")
             if avg > best_train_avg and len(scores_deque) >= 10:
@@ -576,9 +643,9 @@ def train(cfg=None):
                         "learn_steps": agent.learn_steps, "loops": 0}
             timing = dict.fromkeys(timing, 0.0)
 
-        # several envs can finish in one step, so compare eval "slots" rather
-        # than testing completed % eval_every
-        if completed // cfg.eval_every > (last_eval_at or 0) // cfg.eval_every:
+        # env_steps grows by up to num_envs per iteration, so compare eval
+        # "slots" rather than testing env_steps % eval_every_steps
+        if env_steps // cfg.eval_every_steps > (last_eval_at or 0) // cfg.eval_every_steps:
             run_eval()
             summary = {"episodes": completed, "env_steps": env_steps,
                        "learn_steps": agent.learn_steps,
@@ -586,7 +653,7 @@ def train(cfg=None):
                        "best_eval": best_eval, "best_train_avg100": best_train_avg}
             log.save_json("summary.json", summary)
 
-    if last_eval_at != completed:
+    if last_eval_at != env_steps:
         run_eval()  # final policy
     log.save_model(agent.model, "last.pth")
     summary = {"episodes": completed, "env_steps": env_steps, "learn_steps": agent.learn_steps,
