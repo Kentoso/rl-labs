@@ -1,0 +1,321 @@
+device: mps
+Episode 1	Score -54.1	Avg -54.1	Eps 0.995
+Episode 2	Score -55.2	Avg -54.6	Eps 0.990
+Episode 3	Score -43.2	Avg -50.8	Eps 0.985
+Episode 4	Score -51.6	Avg -51.0	Eps 0.980
+Episode 5	Score -58.3	Avg -52.5	Eps 0.975
+Episode 6	Score -51.5	Avg -52.3	Eps 0.970
+Episode 7	Score -54.4	Avg -52.6	Eps 0.966
+Episode 8	Score -58.0	Avg -53.3	Eps 0.961
+Episode 9	Score -63.7	Avg -54.4	Eps 0.956
+Episode 10	Score -55.4	Avg -54.5	Eps 0.951
+  Saved checkpoint (avg -54.5) -> checkpoint_stats_run.pth
+  Stats over 3970 updates | |TD| >=0.1: 1.3%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.01  max 0.31  clipped 0.00%
+Episode 11	Score -59.7	Avg -55.0	Eps 0.946
+Episode 12	Score -54.5	Avg -55.0	Eps 0.942
+Episode 13	Score -58.7	Avg -55.3	Eps 0.937
+Episode 14	Score -53.6	Avg -55.1	Eps 0.932
+Episode 15	Score -45.9	Avg -54.5	Eps 0.928
+  Saved checkpoint (avg -54.5) -> checkpoint_stats_run.pth
+Episode 16	Score -55.9	Avg -54.6	Eps 0.923
+Episode 17	Score -49.1	Avg -54.3	Eps 0.918
+  Saved checkpoint (avg -54.3) -> checkpoint_stats_run.pth
+Episode 18	Score -57.6	Avg -54.5	Eps 0.914
+Episode 19	Score -52.2	Avg -54.4	Eps 0.909
+Episode 20	Score -51.4	Avg -54.2	Eps 0.905
+  Saved checkpoint (avg -54.2) -> checkpoint_stats_run.pth
+  Stats over 2002 updates | |TD| >=0.1: 1.1%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.00  max 0.04  clipped 0.00%
+Episode 21	Score -67.5	Avg -54.8	Eps 0.900
+Episode 22	Score -52.4	Avg -54.7	Eps 0.896
+Episode 23	Score -52.6	Avg -54.6	Eps 0.891
+Episode 24	Score -57.0	Avg -54.7	Eps 0.887
+Episode 25	Score -52.2	Avg -54.6	Eps 0.882
+Episode 26	Score -51.6	Avg -54.5	Eps 0.878
+Episode 27	Score -58.5	Avg -54.7	Eps 0.873
+Episode 28	Score -55.0	Avg -54.7	Eps 0.869
+Episode 29	Score -55.3	Avg -54.7	Eps 0.865
+Episode 30	Score -57.4	Avg -54.8	Eps 0.860
+  Stats over 2002 updates | |TD| >=0.1: 1.1%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.00  max 0.01  clipped 0.00%
+Episode 31	Score -57.2	Avg -54.9	Eps 0.856
+Episode 32	Score -55.1	Avg -54.9	Eps 0.852
+Episode 33	Score -56.4	Avg -54.9	Eps 0.848
+Episode 34	Score -48.4	Avg -54.7	Eps 0.843
+Episode 35	Score -50.9	Avg -54.6	Eps 0.839
+Episode 36	Score -55.2	Avg -54.6	Eps 0.835
+Episode 37	Score -55.1	Avg -54.6	Eps 0.831
+Episode 38	Score -52.2	Avg -54.6	Eps 0.827
+Episode 39	Score -48.7	Avg -54.4	Eps 0.822
+Episode 40	Score -47.4	Avg -54.2	Eps 0.818
+  Stats over 2002 updates | |TD| >=0.1: 1.1%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.00  max 0.01  clipped 0.00%
+Episode 41	Score -53.6	Avg -54.2	Eps 0.814
+Episode 42	Score -52.9	Avg -54.2	Eps 0.810
+  Saved checkpoint (avg -54.2) -> checkpoint_stats_run.pth
+Episode 43	Score -56.2	Avg -54.2	Eps 0.806
+Episode 44	Score -52.7	Avg -54.2	Eps 0.802
+Episode 45	Score -35.1	Avg -53.8	Eps 0.798
+  Saved checkpoint (avg -53.8) -> checkpoint_stats_run.pth
+Episode 46	Score -48.5	Avg -53.7	Eps 0.794
+  Saved checkpoint (avg -53.7) -> checkpoint_stats_run.pth
+Episode 47	Score -55.8	Avg -53.7	Eps 0.790
+Episode 48	Score -64.2	Avg -53.9	Eps 0.786
+Episode 49	Score -52.0	Avg -53.9	Eps 0.782
+Episode 50	Score -66.0	Avg -54.1	Eps 0.778
+  Stats over 4004 updates | |TD| >=0.1: 1.1%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.00  max 0.02  clipped 0.00%
+Episode 51	Score -57.0	Avg -54.2	Eps 0.774
+Episode 52	Score -59.7	Avg -54.3	Eps 0.771
+Episode 53	Score -52.7	Avg -54.3	Eps 0.767
+Episode 54	Score -62.8	Avg -54.4	Eps 0.763
+Episode 55	Score -57.0	Avg -54.5	Eps 0.759
+Episode 56	Score -47.4	Avg -54.4	Eps 0.755
+Episode 57	Score -67.6	Avg -54.6	Eps 0.751
+Episode 58	Score -66.1	Avg -54.8	Eps 0.748
+Episode 59	Score -68.9	Avg -55.0	Eps 0.744
+Episode 60	Score -53.8	Avg -55.0	Eps 0.740
+  Stats over 2002 updates | |TD| >=0.1: 1.1%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.00  max 0.02  clipped 0.00%
+Episode 61	Score -67.9	Avg -55.2	Eps 0.737
+Episode 62	Score -67.3	Avg -55.4	Eps 0.733
+Episode 63	Score -56.2	Avg -55.4	Eps 0.729
+Episode 64	Score -65.5	Avg -55.6	Eps 0.726
+Episode 65	Score -51.1	Avg -55.5	Eps 0.722
+Episode 66	Score -46.3	Avg -55.4	Eps 0.718
+Episode 67	Score -57.4	Avg -55.4	Eps 0.715
+Episode 68	Score -48.7	Avg -55.3	Eps 0.711
+Episode 69	Score -59.3	Avg -55.4	Eps 0.708
+Episode 70	Score -56.7	Avg -55.4	Eps 0.704
+  Stats over 2002 updates | |TD| >=0.1: 1.1%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.01  max 0.03  clipped 0.00%
+Episode 71	Score -41.8	Avg -55.2	Eps 0.701
+Episode 72	Score -61.2	Avg -55.3	Eps 0.697
+Episode 73	Score -54.4	Avg -55.3	Eps 0.694
+Episode 74	Score -41.0	Avg -55.1	Eps 0.690
+Episode 75	Score -56.5	Avg -55.1	Eps 0.687
+Episode 76	Score -61.7	Avg -55.2	Eps 0.683
+Episode 77	Score -49.7	Avg -55.1	Eps 0.680
+Episode 78	Score -44.0	Avg -55.0	Eps 0.676
+Episode 79	Score -37.7	Avg -54.7	Eps 0.673
+Episode 80	Score -52.9	Avg -54.7	Eps 0.670
+  Stats over 2002 updates | |TD| >=0.1: 1.1%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.01  max 0.03  clipped 0.00%
+Episode 81	Score -35.1	Avg -54.5	Eps 0.666
+Episode 82	Score -49.7	Avg -54.4	Eps 0.663
+Episode 83	Score -47.9	Avg -54.3	Eps 0.660
+Episode 84	Score -57.3	Avg -54.4	Eps 0.656
+Episode 85	Score -49.2	Avg -54.3	Eps 0.653
+Episode 86	Score -49.8	Avg -54.3	Eps 0.650
+Episode 87	Score -39.9	Avg -54.1	Eps 0.647
+Episode 88	Score -34.9	Avg -53.9	Eps 0.643
+Episode 89	Score -40.1	Avg -53.7	Eps 0.640
+Episode 90	Score -35.6	Avg -53.5	Eps 0.637
+  Saved checkpoint (avg -53.5) -> checkpoint_stats_run.pth
+  Stats over 4004 updates | |TD| >=0.1: 1.3%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.01  max 0.05  clipped 0.00%
+Episode 91	Score -29.4	Avg -53.3	Eps 0.634
+  Saved checkpoint (avg -53.3) -> checkpoint_stats_run.pth
+Episode 92	Score -37.3	Avg -53.1	Eps 0.631
+  Saved checkpoint (avg -53.1) -> checkpoint_stats_run.pth
+Episode 93	Score -38.3	Avg -52.9	Eps 0.627
+  Saved checkpoint (avg -52.9) -> checkpoint_stats_run.pth
+Episode 94	Score -30.6	Avg -52.7	Eps 0.624
+  Saved checkpoint (avg -52.7) -> checkpoint_stats_run.pth
+Episode 95	Score -35.9	Avg -52.5	Eps 0.621
+  Saved checkpoint (avg -52.5) -> checkpoint_stats_run.pth
+Episode 96	Score -51.7	Avg -52.5	Eps 0.618
+  Saved checkpoint (avg -52.5) -> checkpoint_stats_run.pth
+Episode 97	Score -46.8	Avg -52.4	Eps 0.615
+  Saved checkpoint (avg -52.4) -> checkpoint_stats_run.pth
+Episode 98	Score -40.6	Avg -52.3	Eps 0.612
+  Saved checkpoint (avg -52.3) -> checkpoint_stats_run.pth
+Episode 99	Score -30.5	Avg -52.1	Eps 0.609
+  Saved checkpoint (avg -52.1) -> checkpoint_stats_run.pth
+Episode 100	Score -41.4	Avg -52.0	Eps 0.606
+  Saved checkpoint (avg -52.0) -> checkpoint_stats_run.pth
+  Stats over 2002 updates | |TD| >=0.1: 1.8%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.02  max 0.08  clipped 0.00%
+Episode 101	Score -38.4	Avg -51.8	Eps 0.603
+  Saved checkpoint (avg -51.8) -> checkpoint_stats_run.pth
+Episode 102	Score -33.8	Avg -51.6	Eps 0.600
+  Saved checkpoint (avg -51.6) -> checkpoint_stats_run.pth
+Episode 103	Score -24.8	Avg -51.4	Eps 0.597
+  Saved checkpoint (avg -51.4) -> checkpoint_stats_run.pth
+Episode 104	Score -27.8	Avg -51.2	Eps 0.594
+  Saved checkpoint (avg -51.2) -> checkpoint_stats_run.pth
+Episode 105	Score -38.5	Avg -51.0	Eps 0.591
+  Saved checkpoint (avg -51.0) -> checkpoint_stats_run.pth
+Episode 106	Score -32.2	Avg -50.8	Eps 0.588
+  Saved checkpoint (avg -50.8) -> checkpoint_stats_run.pth
+Episode 107	Score -32.7	Avg -50.6	Eps 0.585
+  Saved checkpoint (avg -50.6) -> checkpoint_stats_run.pth
+Episode 108	Score -25.7	Avg -50.3	Eps 0.582
+  Saved checkpoint (avg -50.3) -> checkpoint_stats_run.pth
+Episode 109	Score -22.3	Avg -49.9	Eps 0.579
+  Saved checkpoint (avg -49.9) -> checkpoint_stats_run.pth
+Episode 110	Score -27.9	Avg -49.6	Eps 0.576
+  Saved checkpoint (avg -49.6) -> checkpoint_stats_run.pth
+  Stats over 2002 updates | |TD| >=0.1: 2.3%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.02  max 0.07  clipped 0.00%
+Episode 111	Score -30.4	Avg -49.3	Eps 0.573
+  Saved checkpoint (avg -49.3) -> checkpoint_stats_run.pth
+Episode 112	Score -35.2	Avg -49.1	Eps 0.570
+  Saved checkpoint (avg -49.1) -> checkpoint_stats_run.pth
+Episode 113	Score -29.1	Avg -48.8	Eps 0.568
+  Saved checkpoint (avg -48.8) -> checkpoint_stats_run.pth
+Episode 114	Score 41.6	Avg -47.8	Eps 0.565
+  Saved checkpoint (avg -47.8) -> checkpoint_stats_run.pth
+Episode 115	Score -19.4	Avg -47.6	Eps 0.562
+  Saved checkpoint (avg -47.6) -> checkpoint_stats_run.pth
+Episode 116	Score -27.8	Avg -47.3	Eps 0.559
+  Saved checkpoint (avg -47.3) -> checkpoint_stats_run.pth
+Episode 117	Score -32.9	Avg -47.1	Eps 0.556
+  Saved checkpoint (avg -47.1) -> checkpoint_stats_run.pth
+Episode 118	Score -33.6	Avg -46.9	Eps 0.554
+  Saved checkpoint (avg -46.9) -> checkpoint_stats_run.pth
+Episode 119	Score -33.8	Avg -46.7	Eps 0.551
+  Saved checkpoint (avg -46.7) -> checkpoint_stats_run.pth
+Episode 120	Score -34.0	Avg -46.5	Eps 0.548
+  Saved checkpoint (avg -46.5) -> checkpoint_stats_run.pth
+  Stats over 2002 updates | |TD| >=0.1: 2.8%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.03  max 0.08  clipped 0.00%
+Episode 121	Score -42.4	Avg -46.3	Eps 0.545
+  Saved checkpoint (avg -46.3) -> checkpoint_stats_run.pth
+Episode 122	Score 1.6	Avg -45.7	Eps 0.543
+  Saved checkpoint (avg -45.7) -> checkpoint_stats_run.pth
+Episode 123	Score -44.8	Avg -45.7	Eps 0.540
+  Saved checkpoint (avg -45.7) -> checkpoint_stats_run.pth
+Episode 124	Score -19.9	Avg -45.3	Eps 0.537
+  Saved checkpoint (avg -45.3) -> checkpoint_stats_run.pth
+Episode 125	Score -25.4	Avg -45.0	Eps 0.534
+  Saved checkpoint (avg -45.0) -> checkpoint_stats_run.pth
+Episode 126	Score 16.1	Avg -44.4	Eps 0.532
+  Saved checkpoint (avg -44.4) -> checkpoint_stats_run.pth
+Episode 127	Score -43.1	Avg -44.2	Eps 0.529
+  Saved checkpoint (avg -44.2) -> checkpoint_stats_run.pth
+Episode 128	Score -33.3	Avg -44.0	Eps 0.526
+  Saved checkpoint (avg -44.0) -> checkpoint_stats_run.pth
+Episode 129	Score -19.5	Avg -43.6	Eps 0.524
+  Saved checkpoint (avg -43.6) -> checkpoint_stats_run.pth
+Episode 130	Score -27.8	Avg -43.3	Eps 0.521
+  Saved checkpoint (avg -43.3) -> checkpoint_stats_run.pth
+  Stats over 4004 updates | |TD| >=0.1: 3.1%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.03  max 0.09  clipped 0.00%
+Episode 131	Score -20.6	Avg -43.0	Eps 0.519
+  Saved checkpoint (avg -43.0) -> checkpoint_stats_run.pth
+Episode 132	Score -23.7	Avg -42.6	Eps 0.516
+  Saved checkpoint (avg -42.6) -> checkpoint_stats_run.pth
+Episode 133	Score -47.1	Avg -42.6	Eps 0.513
+  Saved checkpoint (avg -42.6) -> checkpoint_stats_run.pth
+Episode 134	Score -32.1	Avg -42.4	Eps 0.511
+  Saved checkpoint (avg -42.4) -> checkpoint_stats_run.pth
+Episode 135	Score -28.8	Avg -42.2	Eps 0.508
+  Saved checkpoint (avg -42.2) -> checkpoint_stats_run.pth
+Episode 136	Score -21.9	Avg -41.8	Eps 0.506
+  Saved checkpoint (avg -41.8) -> checkpoint_stats_run.pth
+Episode 137	Score 4.4	Avg -41.2	Eps 0.503
+  Saved checkpoint (avg -41.2) -> checkpoint_stats_run.pth
+Episode 138	Score -35.0	Avg -41.1	Eps 0.501
+  Saved checkpoint (avg -41.1) -> checkpoint_stats_run.pth
+Episode 139	Score -4.4	Avg -40.6	Eps 0.498
+  Saved checkpoint (avg -40.6) -> checkpoint_stats_run.pth
+Episode 140	Score -23.4	Avg -40.4	Eps 0.496
+  Saved checkpoint (avg -40.4) -> checkpoint_stats_run.pth
+  Stats over 2002 updates | |TD| >=0.1: 3.3%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.03  max 0.08  clipped 0.00%
+Episode 141	Score -33.6	Avg -40.2	Eps 0.493
+  Saved checkpoint (avg -40.2) -> checkpoint_stats_run.pth
+Episode 142	Score 8.7	Avg -39.6	Eps 0.491
+  Saved checkpoint (avg -39.6) -> checkpoint_stats_run.pth
+Episode 143	Score -31.4	Avg -39.3	Eps 0.488
+  Saved checkpoint (avg -39.3) -> checkpoint_stats_run.pth
+Episode 144	Score -33.8	Avg -39.1	Eps 0.486
+  Saved checkpoint (avg -39.1) -> checkpoint_stats_run.pth
+Episode 145	Score -34.6	Avg -39.1	Eps 0.483
+  Saved checkpoint (avg -39.1) -> checkpoint_stats_run.pth
+Episode 146	Score -36.8	Avg -39.0	Eps 0.481
+  Saved checkpoint (avg -39.0) -> checkpoint_stats_run.pth
+Episode 147	Score -41.5	Avg -38.9	Eps 0.479
+  Saved checkpoint (avg -38.9) -> checkpoint_stats_run.pth
+Episode 148	Score -27.8	Avg -38.5	Eps 0.476
+  Saved checkpoint (avg -38.5) -> checkpoint_stats_run.pth
+Episode 149	Score -27.0	Avg -38.3	Eps 0.474
+  Saved checkpoint (avg -38.3) -> checkpoint_stats_run.pth
+Episode 150	Score -31.5	Avg -37.9	Eps 0.471
+  Saved checkpoint (avg -37.9) -> checkpoint_stats_run.pth
+  Stats over 2002 updates | |TD| >=0.1: 3.3%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.04  max 0.09  clipped 0.00%
+Episode 151	Score -22.3	Avg -37.6	Eps 0.469
+  Saved checkpoint (avg -37.6) -> checkpoint_stats_run.pth
+Episode 152	Score -12.2	Avg -37.1	Eps 0.467
+  Saved checkpoint (avg -37.1) -> checkpoint_stats_run.pth
+Episode 153	Score -27.8	Avg -36.8	Eps 0.464
+  Saved checkpoint (avg -36.8) -> checkpoint_stats_run.pth
+Episode 154	Score -48.6	Avg -36.7	Eps 0.462
+  Saved checkpoint (avg -36.7) -> checkpoint_stats_run.pth
+Episode 155	Score -39.6	Avg -36.5	Eps 0.460
+  Saved checkpoint (avg -36.5) -> checkpoint_stats_run.pth
+Episode 156	Score -30.8	Avg -36.4	Eps 0.458
+  Saved checkpoint (avg -36.4) -> checkpoint_stats_run.pth
+Episode 157	Score -34.9	Avg -36.0	Eps 0.455
+  Saved checkpoint (avg -36.0) -> checkpoint_stats_run.pth
+Episode 158	Score -38.6	Avg -35.8	Eps 0.453
+  Saved checkpoint (avg -35.8) -> checkpoint_stats_run.pth
+Episode 159	Score -35.6	Avg -35.4	Eps 0.451
+  Saved checkpoint (avg -35.4) -> checkpoint_stats_run.pth
+Episode 160	Score -41.4	Avg -35.3	Eps 0.448
+  Saved checkpoint (avg -35.3) -> checkpoint_stats_run.pth
+  Stats over 2002 updates | |TD| >=0.1: 3.2%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.04  max 0.09  clipped 0.00%
+Episode 161	Score -26.3	Avg -34.9	Eps 0.446
+  Saved checkpoint (avg -34.9) -> checkpoint_stats_run.pth
+Episode 162	Score -45.3	Avg -34.7	Eps 0.444
+  Saved checkpoint (avg -34.7) -> checkpoint_stats_run.pth
+Episode 163	Score -36.3	Avg -34.5	Eps 0.442
+  Saved checkpoint (avg -34.5) -> checkpoint_stats_run.pth
+Episode 164	Score -37.7	Avg -34.2	Eps 0.440
+  Saved checkpoint (avg -34.2) -> checkpoint_stats_run.pth
+Episode 165	Score -19.0	Avg -33.9	Eps 0.437
+  Saved checkpoint (avg -33.9) -> checkpoint_stats_run.pth
+Episode 166	Score -67.4	Avg -34.1	Eps 0.435
+Episode 167	Score -33.8	Avg -33.8	Eps 0.433
+  Saved checkpoint (avg -33.8) -> checkpoint_stats_run.pth
+Episode 168	Score -33.3	Avg -33.7	Eps 0.431
+  Saved checkpoint (avg -33.7) -> checkpoint_stats_run.pth
+Episode 169	Score -40.4	Avg -33.5	Eps 0.429
+  Saved checkpoint (avg -33.5) -> checkpoint_stats_run.pth
+Episode 170	Score -29.6	Avg -33.2	Eps 0.427
+  Saved checkpoint (avg -33.2) -> checkpoint_stats_run.pth
+  Stats over 4004 updates | |TD| >=0.1: 3.0%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.04  max 0.11  clipped 0.00%
+Episode 171	Score -33.3	Avg -33.1	Eps 0.424
+  Saved checkpoint (avg -33.1) -> checkpoint_stats_run.pth
+Episode 172	Score -39.8	Avg -32.9	Eps 0.422
+  Saved checkpoint (avg -32.9) -> checkpoint_stats_run.pth
+Episode 173	Score -23.4	Avg -32.6	Eps 0.420
+  Saved checkpoint (avg -32.6) -> checkpoint_stats_run.pth
+Episode 174	Score -38.8	Avg -32.6	Eps 0.418
+  Saved checkpoint (avg -32.6) -> checkpoint_stats_run.pth
+Episode 175	Score -56.4	Avg -32.6	Eps 0.416
+  Saved checkpoint (avg -32.6) -> checkpoint_stats_run.pth
+Episode 176	Score -39.6	Avg -32.4	Eps 0.414
+  Saved checkpoint (avg -32.4) -> checkpoint_stats_run.pth
+Episode 177	Score -24.7	Avg -32.1	Eps 0.412
+  Saved checkpoint (avg -32.1) -> checkpoint_stats_run.pth
+Episode 178	Score -65.9	Avg -32.3	Eps 0.410
+Episode 179	Score -26.8	Avg -32.2	Eps 0.408
+Episode 180	Score -60.5	Avg -32.3	Eps 0.406
+  Stats over 2002 updates | |TD| >=0.1: 2.8%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.04  max 0.09  clipped 0.00%
+Episode 181	Score -29.3	Avg -32.3	Eps 0.404
+Episode 182	Score -27.0	Avg -32.0	Eps 0.402
+  Saved checkpoint (avg -32.0) -> checkpoint_stats_run.pth
+Episode 183	Score -54.4	Avg -32.1	Eps 0.400
+Episode 184	Score -37.1	Avg -31.9	Eps 0.398
+  Saved checkpoint (avg -31.9) -> checkpoint_stats_run.pth
+Episode 185	Score -55.7	Avg -32.0	Eps 0.396
+Episode 186	Score -30.4	Avg -31.8	Eps 0.394
+  Saved checkpoint (avg -31.8) -> checkpoint_stats_run.pth
+Episode 187	Score -54.1	Avg -31.9	Eps 0.392
+Episode 188	Score -32.6	Avg -31.9	Eps 0.390
+Episode 189	Score -1.5	Avg -31.5	Eps 0.388
+  Saved checkpoint (avg -31.5) -> checkpoint_stats_run.pth
+Episode 190	Score -16.2	Avg -31.3	Eps 0.386
+  Saved checkpoint (avg -31.3) -> checkpoint_stats_run.pth
+  Stats over 2002 updates | |TD| >=0.1: 2.8%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.04  max 0.09  clipped 0.00%
+Episode 191	Score -45.8	Avg -31.5	Eps 0.384
+Episode 192	Score -50.5	Avg -31.6	Eps 0.382
+Episode 193	Score -47.4	Avg -31.7	Eps 0.380
+Episode 194	Score -30.1	Avg -31.7	Eps 0.378
+Episode 195	Score -33.3	Avg -31.7	Eps 0.376
+Episode 196	Score -52.4	Avg -31.7	Eps 0.374
+Episode 197	Score -36.2	Avg -31.6	Eps 0.373
+Episode 198	Score -34.8	Avg -31.5	Eps 0.371
+Episode 199	Score -59.0	Avg -31.8	Eps 0.369
+Episode 200	Score -37.3	Avg -31.7	Eps 0.367
+  Stats over 2002 updates | |TD| >=0.1: 2.7%  >=1: 0.0%  >=10: 0.00% | grad norm mean 0.04  max 0.09  clipped 0.00%
+done in 10.4 min

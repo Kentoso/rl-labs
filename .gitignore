@@ -11,3 +11,4 @@ wheels/
 .DS_Store
 # Lab 3 artifacts
 lab3/videos/
+lab3/runs/

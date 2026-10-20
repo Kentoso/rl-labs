@@ -9,6 +9,7 @@ dependencies = [
     "matplotlib>=3.11.2",
     "moviepy>=2.2.1",
     "opencv-python-headless>=5.0.0.93",
+    "pandas>=3.0.6",
     "swig>=4.5.0",
     "torch>=2.14.1",
     "tqdm>=4.70.1",

@@ -168,6 +168,50 @@ video stalls.
 **Checks:** stats for a fixed batch match a manual recomputation. Overhead: `replay()`
 8.14 → 8.22 ms (counters stay on the device; one sync per report).
 
+**Results — 200-episode run** (`logs/stats_run_200ep.log`, 10.4 min, ε 1.0 → 0.37,
+training avg −55 → −32, i.e. the agent isn't driving yet):
+
+| | episodes 1–100 | episodes 100–200 |
+|---|---|---|
+| \|TD\| ≥ 0.1 scaled (≥ 1 raw) | ~1.1% | 2.7–3.3% |
+| \|TD\| ≥ 1 scaled (≥ 10 raw) | 0.0% | 0.0% |
+| grad norm mean / max | ≤0.01 / 0.31 | 0.04 / 0.11 |
+| updates clipped at 10 | 0% | 0% |
+
+- **Clipping** never triggered; the largest norm (0.31) is ~30× below the limit.
+- **Huber**: every TD error is in the quadratic part, and ~97% would be even without
+  reward scaling (< 1 raw unit). So far the "/10 moves errors out of the linear part"
+  argument doesn't apply; only the output-scale argument does.
+- **Caveat:** this covers only the phase before the car drives. Q-values (and TD errors)
+  should grow once laps start succeeding; a full run's logs will show whether that
+  changes either conclusion.
+
+## 2026-10-20 — Detailed run artifacts + Colab notebook (uncommitted)
+
+**What:**
+- `train(cfg)` takes a `Config` dataclass (all hyperparameters, incl. `max_grad_norm=None`
+  to disable clipping) and writes `runs/<timestamp>_<run_name>/`:
+  `config.json` (config + device/GPU/CPU/versions/git commit), `episodes.csv` (score,
+  length, end reason lap/off_playfield/timeout, Q(s₀) vs discounted return, mean Q, action
+  counts, ε), `updates.csv` (loss, Q, target, |TD| shares, grad norm mean/max, clipped
+  share, non-finite grads, env steps/s, updates/s, ms per loop phase act/update/env wait),
+  `evals.csv` (greedy episodes on fixed tracks), `summary.json`, `checkpoints/`.
+- Greedy evaluation every `eval_every=50` episodes on 10 fixed seeded tracks (10000–10009),
+  run in parallel in a second vector env. `best.pth` = best eval mean; the old criterion
+  (best training avg100 under ε-greedy) is kept as `best_train_avg.pth` for comparison.
+- Without clipping, the grad norm is still measured every `grad_norm_every=50` updates.
+- `act_batch(..., return_q=True)` also returns max-Q (no extra forward pass) and copies
+  uint8 frames to the device instead of float32.
+- `test()` (used by `render()`) now stops at the end of each episode; it kept stepping
+  until 10000 steps before.
+- `train_colab.py` (jupytext, paired with `train_colab.ipynb`): clone repo, install
+  `gymnasium[box2d]==1.3.0`, set `Config`, train, run `test_car_racing.py` on `best.pth`.
+  Runs go to Google Drive by default.
+
+**Why:** Analyse and compare runs from data instead of console logs; pick the submitted
+checkpoint by greedy performance (what `test_car_racing.py` measures) rather than by the
+ε-greedy training average; train on a Colab GPU.
+
 ---
 
 ## Investigated, not adopted
