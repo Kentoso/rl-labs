@@ -34,6 +34,8 @@ torch.backends.cudnn.benchmark = True  # autotune convs for fixed input size
 
 FRAME_STACK = 4
 FRAME_SIZE = 84
+# Separate from the baseline's checkpoint_CarRacing-v3_best.pth so training never overwrites it
+CHECKPOINT = "checkpoint_CarRacing-v3_lab3.pth"
 
 
 def make_env(render_mode=None):
@@ -133,10 +135,21 @@ class ReplayBuffer:
         return self.size
 
 
+def clip_grad_norm(params, max_norm):
+    """Same result as nn.utils.clip_grad_norm_, but one norm over all grads
+    concatenated: MPS has no foreach kernels, so the builtin launches ~25
+    tiny ops per call (2.7 ms vs 1.6 ms here)."""
+    grads = [p.grad for p in params if p.grad is not None]
+    norm = torch.cat([g.reshape(-1) for g in grads]).norm()
+    torch._foreach_mul_(grads, (max_norm / (norm + 1e-6)).clamp(max=1.0))
+    return norm
+
+
 class DQNAgent:
     def __init__(self, action_dim, obs_shape, lr=1e-4, gamma=0.99, epsilon=1.0,
                  epsilon_min=0.05, epsilon_decay=0.995, buffer_size=50000,
-                 batch_size=128, target_update=1000, double_dqn=True):
+                 batch_size=128, target_update=1000, double_dqn=True,
+                 reward_scale=0.1):
         self.action_dim = action_dim
         self.gamma = gamma
         self.epsilon = epsilon
@@ -145,16 +158,47 @@ class DQNAgent:
         self.batch_size = batch_size
         self.target_update = target_update
         self.double_dqn = double_dqn
+        self.reward_scale = reward_scale
 
         self.model = QNetwork(a_size=action_dim).to(device)
         self.target_model = QNetwork(a_size=action_dim).to(device)
         self.target_model.load_state_dict(self.model.state_dict())
-        self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
+        # fused: one kernel for the whole update (0.99 -> 0.50 ms on MPS)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=lr, fused=True)
         self.memory = ReplayBuffer(buffer_size, obs_shape)
         self.scaler = torch.amp.GradScaler(device.type, enabled=device.type == "cuda")
         self.learn_steps = 0
+        self.max_grad_norm = 10.0
+
+        # Training diagnostics, accumulated on the device (no per-update sync)
+        # and read by pop_stats(). |TD| edges are in scaled reward units; the
+        # smooth_l1 kink is at 1, so ">= 1" is the share in Huber's linear part.
+        self.td_edges = torch.tensor([0.1, 1.0, 10.0], device=device)
+        self._reset_stats()
+
+    def _reset_stats(self):
+        self.stat_updates = 0
+        self.td_at_least = torch.zeros(len(self.td_edges), device=device)
+        self.n_clipped = torch.zeros((), device=device)
+        self.grad_norm_sum = torch.zeros((), device=device)
+        self.grad_norm_max = torch.zeros((), device=device)
+
+    def pop_stats(self):
+        """Summary since the last call, as a printable line; resets counters."""
+        n = self.stat_updates
+        if n == 0:
+            return "  Stats: no updates yet"
+        td = (self.td_at_least / (n * self.batch_size) * 100).tolist()
+        line = (f"  Stats over {n} updates | |TD| >=0.1: {td[0]:.1f}%  >=1: {td[1]:.1f}%"
+                f"  >=10: {td[2]:.2f}% | grad norm mean {self.grad_norm_sum.item() / n:.2f}"
+                f"  max {self.grad_norm_max.item():.2f}"
+                f"  clipped {self.n_clipped.item() / n * 100:.2f}%")
+        self._reset_stats()
+        return line
 
     def remember(self, states, actions, rewards, next_states, dones):
+        # Scale only what the Q-net learns from; episode scores stay in env units
+        rewards = np.asarray(rewards, dtype=np.float32) * self.reward_scale
         self.memory.push(states, actions, rewards, next_states, dones)
 
     def replay(self):
@@ -178,9 +222,16 @@ class DQNAgent:
         self.optimizer.zero_grad(set_to_none=True)
         self.scaler.scale(loss).backward()
         self.scaler.unscale_(self.optimizer)
-        nn.utils.clip_grad_norm_(self.model.parameters(), 10.0)
+        grad_norm = clip_grad_norm(self.model.parameters(), self.max_grad_norm)
         self.scaler.step(self.optimizer)
         self.scaler.update()
+
+        td = (q_values - target).detach().abs().float()
+        self.td_at_least += (td >= self.td_edges).sum(0)
+        self.n_clipped += grad_norm > self.max_grad_norm
+        self.grad_norm_sum += grad_norm
+        self.grad_norm_max = torch.maximum(self.grad_norm_max, grad_norm)
+        self.stat_updates += 1
 
         self.learn_steps += 1
         if self.learn_steps % self.target_update == 0:
@@ -190,12 +241,17 @@ class DQNAgent:
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
 
-def train(num_envs=8, n_episodes=1000, updates_per_step=2, validate_every=50):
+def train(num_envs=8, n_episodes=1000, updates_per_step=2, checkpoint=CHECKPOINT,
+          stats_every=10):
     """Train with several CarRacing envs stepped in parallel.
 
     Transitions from every env feed a single shared replay buffer and one
     Q-network. Gymnasium's vector API auto-resets a sub-env on the step
     after it finishes, so we skip storing that bridging transition.
+
+    Env stepping (CPU subprocesses) overlaps with the gradient updates
+    (GPU): actions are sent with step_async, the updates run while the
+    envs compute, and step_wait collects the results.
     """
     env = make_vec_env(num_envs)
     agent = DQNAgent(env.single_action_space.n, env.single_observation_space.shape)
@@ -203,7 +259,6 @@ def train(num_envs=8, n_episodes=1000, updates_per_step=2, validate_every=50):
     scores = []
     scores_deque = deque(maxlen=100)
     best_reward = -np.inf
-    checkpoint = "checkpoint_CarRacing-v3_best.pth"
 
     states, _ = env.reset()
     prev_done = np.zeros(num_envs, dtype=bool)
@@ -212,7 +267,10 @@ def train(num_envs=8, n_episodes=1000, updates_per_step=2, validate_every=50):
 
     while completed < n_episodes:
         actions = agent.model.act_batch(states, epsilon=agent.epsilon)
-        next_states, rewards, terminations, truncations, _ = env.step(actions)
+        env.step_async(actions)
+        for _ in range(updates_per_step):
+            agent.replay()
+        next_states, rewards, terminations, truncations, _ = env.step_wait()
         dones = np.logical_or(terminations, truncations)
 
         # autoreset step: next_states[i] is a fresh episode start, don't store it
@@ -236,14 +294,11 @@ def train(num_envs=8, n_episodes=1000, updates_per_step=2, validate_every=50):
                     best_reward = avg
                     torch.save(agent.model.state_dict(), checkpoint)
                     print(f"  Saved checkpoint (avg {avg:.1f}) -> {checkpoint}")
-                if completed % validate_every == 0:
-                    evaluate(agent.model, completed)
+                if completed % stats_every == 0:
+                    print(agent.pop_stats())
 
         states = next_states
         prev_done = dones
-
-        for _ in range(updates_per_step):
-            agent.replay()
 
     env.close()
     return scores
@@ -264,26 +319,7 @@ def test(env, policy, num_episodes=5):
     return avg
 
 
-def evaluate(policy, episode, video_folder="videos"):
-    """Greedy validation episode recorded to MP4 (online rendering)."""
-    env = make_env(render_mode="rgb_array")
-    env = RecordVideo(
-        env,
-        video_folder=video_folder,
-        name_prefix=f"val-ep{episode}",
-        episode_trigger=lambda e: True,
-    )
-    was_training = policy.training
-    policy.eval()
-    reward = test(env, policy, num_episodes=1)
-    env.close()
-    if was_training:
-        policy.train()
-    print(f"  Validation @ episode {episode}: reward {reward:.1f} (video -> {video_folder}/)")
-    return reward
-
-
-def render(checkpoint="checkpoint_CarRacing-v3_best.pth", num_episodes=3,
+def render(checkpoint=CHECKPOINT, num_episodes=3,
            video_folder="videos"):
     """Record the trained agent playing to MP4 files (works headless)."""
     env = make_env(render_mode="rgb_array")
