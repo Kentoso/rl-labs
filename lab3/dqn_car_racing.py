@@ -81,26 +81,97 @@ class NoProgressTruncation(gym.Wrapper):
         return obs, reward, terminated, truncated, info
 
 
-def make_vec_env(num_envs, no_progress_steps=None):
+class EpisodeInfo(gym.Wrapper):
+    """Adds diagnostics to info: tiles visited so far, tiles on the track and
+    the car's speed. Read-only; observations and rewards are untouched."""
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        car_racing = self.env.unwrapped
+        info["tiles"] = car_racing.tile_visited_count
+        info["track_tiles"] = len(car_racing.track)
+        info["speed"] = float(np.linalg.norm(car_racing.car.hull.linearVelocity))
+        return obs, reward, terminated, truncated, info
+
+
+class ActionRepeat(gym.Wrapper):
+    """Repeat each action for k frames and return the summed reward.
+
+    The observation is still make_env's stack of the last 4 consecutive
+    frames, so a policy trained this way can act every frame at test time.
+    info["frames"] says how many frames ran (fewer than k if the episode ended).
+    """
+
+    def __init__(self, env, k):
+        super().__init__(env)
+        self.k = k
+
+    def step(self, action):
+        total = 0.0
+        for frames in range(1, self.k + 1):
+            obs, reward, terminated, truncated, info = self.env.step(action)
+            total += float(reward)
+            if terminated or truncated:
+                break
+        info["frames"] = frames
+        return obs, total, terminated, truncated, info
+
+
+def make_train_env(no_progress_steps=None, action_repeat=1):
+    """make_env plus diagnostics and the training-only wrappers."""
+    env = EpisodeInfo(make_env())
+    if no_progress_steps is not None:
+        env = NoProgressTruncation(env, no_progress_steps)
+    if action_repeat > 1:
+        env = ActionRepeat(env, action_repeat)
+    return env
+
+
+def make_vec_env(num_envs, no_progress_steps=None, action_repeat=1):
     """Several CarRacing instances stepped in parallel subprocesses."""
-    if no_progress_steps is None:
-        return gym.vector.AsyncVectorEnv([make_env for _ in range(num_envs)])
     return gym.vector.AsyncVectorEnv(
-        [lambda: NoProgressTruncation(make_env(), no_progress_steps) for _ in range(num_envs)])
+        [lambda: make_train_env(no_progress_steps, action_repeat) for _ in range(num_envs)])
 
 
 class QNetwork(nn.Module):
-    """CNN mapping a stack of frames to action values (Nature DQN)."""
+    """CNN mapping a stack of frames to action values (Nature DQN).
 
-    def __init__(self, in_channels=FRAME_STACK, a_size=5):
+    dueling=True (Wang et al. 2016, arXiv:1511.06581) splits the head into a
+    state value V(s) and advantages A(s, a):
+        Q(s, a) = V(s) + A(s, a) - mean_a' A(s, a')
+    The output is still one Q-value per action. load_state_dict picks the head
+    from the checkpoint's keys, so test_car_racing.py (which builds the default
+    network) loads both kinds of checkpoint.
+    """
+
+    def __init__(self, in_channels=FRAME_STACK, a_size=5, dueling=False):
         super().__init__()
         self.a_size = a_size
 
         self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=8, stride=4)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)
         self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
+        self._build_head(dueling)
+
+    def _build_head(self, dueling):
+        for name in ("fc1", "fc2", "fc_value1", "fc_value2"):
+            if hasattr(self, name):
+                delattr(self, name)
+        self.dueling = dueling
+        # advantage stream (or the plain Q head); the names match the
+        # baseline's fc1/fc2 so baseline checkpoints load unchanged
         self.fc1 = nn.Linear(64 * 7 * 7, 512)
-        self.fc2 = nn.Linear(512, a_size)
+        self.fc2 = nn.Linear(512, self.a_size)
+        if dueling:
+            self.fc_value1 = nn.Linear(64 * 7 * 7, 512)
+            self.fc_value2 = nn.Linear(512, 1)
+
+    def load_state_dict(self, state_dict, *args, **kwargs):
+        dueling = "fc_value1.weight" in state_dict
+        if dueling != self.dueling:
+            self._build_head(dueling)
+            self.to(self.conv1.weight.device)
+        return super().load_state_dict(state_dict, *args, **kwargs)
 
     def forward(self, x):
         x = x / 255.0
@@ -108,8 +179,11 @@ class QNetwork(nn.Module):
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         x = x.reshape(x.size(0), -1)
-        x = F.relu(self.fc1(x))
-        return self.fc2(x)
+        a = self.fc2(F.relu(self.fc1(x)))
+        if not self.dueling:
+            return a
+        v = self.fc_value2(F.relu(self.fc_value1(x)))
+        return v + a - a.mean(dim=1, keepdim=True)
 
     def act(self, state, epsilon=0.0):
         if np.random.rand() <= epsilon:
@@ -208,6 +282,11 @@ class Config:
     # store only real terminals (off playfield, lap done) as done; timeouts and
     # no-progress cuts bootstrap from the next state. False = baseline behaviour
     bootstrap_truncation: bool = True
+    # training envs hold each action for this many frames; the transition stores
+    # the summed reward and the target discounts by gamma ** action_repeat.
+    # env steps (budgets, epsilon, evals) still count frames. Evals and the
+    # test act every frame
+    action_repeat: int = 1
     # gradient updates per stored transition; the updates per loop iteration
     # follow from it (0.25 = the baseline's 2 updates per step with 8 envs), so
     # changing num_envs doesn't change how often each transition is replayed
@@ -219,6 +298,7 @@ class Config:
     buffer_size: int = 50_000
     target_update: int = 500  # in gradient updates (500 x 256 / 0.125 = 4000 transitions)
     double_dqn: bool = True
+    dueling: bool = False  # V(s) + A(s, a) head, see QNetwork
     reward_scale: float = 0.1
     max_grad_norm: float | None = 10.0  # None disables clipping
     # exploration: linear decay over epsilon_decay_steps env steps, or, when
@@ -244,8 +324,10 @@ class DQNAgent:
         self.action_dim = action_dim
         self.epsilon = cfg.epsilon_start
 
-        self.model = QNetwork(a_size=action_dim).to(device)
-        self.target_model = QNetwork(a_size=action_dim).to(device)
+        self.model = QNetwork(a_size=action_dim, dueling=cfg.dueling).to(device)
+        self.target_model = QNetwork(a_size=action_dim, dueling=cfg.dueling).to(device)
+        # one stored transition spans action_repeat frames
+        self.gamma = cfg.gamma ** cfg.action_repeat
         self.target_model.load_state_dict(self.model.state_dict())
         # fused: one kernel for the whole update (0.99 -> 0.50 ms on MPS)
         self.optimizer = optim.Adam(self.model.parameters(), lr=cfg.lr, fused=True)
@@ -305,7 +387,7 @@ class DQNAgent:
                     next_q = self.target_model(next_states).gather(1, next_actions)
                 else:
                     next_q = self.target_model(next_states).max(1, keepdim=True)[0]
-                target = rewards + cfg.gamma * next_q * (1 - dones)
+                target = rewards + self.gamma * next_q * (1 - dones)
             loss = F.smooth_l1_loss(q_values, target)
 
         self.optimizer.zero_grad(set_to_none=True)
@@ -363,21 +445,26 @@ class EpisodeTracker:
         self.ret = np.zeros(n)
         self.disc_ret = np.zeros(n)
         self.discount = np.ones(n)
-        self.length = np.zeros(n, dtype=np.int64)
+        self.length = np.zeros(n, dtype=np.int64)  # frames
+        self.decisions = np.zeros(n, dtype=np.int64)
         self.q_start = np.zeros(n)
         self.q_sum = np.zeros(n)
+        self.speed_sum = np.zeros(n)
         self.actions = np.zeros((n, self.n_actions), dtype=np.int64)
 
-    def step(self, i, action, max_q, reward):
+    def step(self, i, action, max_q, reward, frames=1, speed=0.0):
+        """One decision of env i that ran `frames` frames (action repeat)."""
         q_raw = max_q / self.reward_scale  # back to env reward units
-        if self.length[i] == 0:
+        if self.decisions[i] == 0:
             self.q_start[i] = q_raw
         self.q_sum[i] += q_raw
-        self.actions[i, action] += 1
+        self.speed_sum[i] += speed
+        self.actions[i, action] += frames
         self.ret[i] += reward
         self.disc_ret[i] += self.discount[i] * reward
-        self.discount[i] *= self.gamma
-        self.length[i] += 1
+        self.discount[i] *= self.gamma ** frames
+        self.length[i] += frames
+        self.decisions[i] += 1
 
     def finish(self, i, terminated, info):
         """Row describing the finished episode of env i; resets its counters."""
@@ -391,20 +478,31 @@ class EpisodeTracker:
         else:
             end = "no_progress" if no_progress else "timeout"
         length = int(self.length[i])
+        decisions = max(int(self.decisions[i]), 1)
+        tiles = int(info["tiles"][i]) if "tiles" in info else -1
+        track_tiles = int(info["track_tiles"][i]) if "track_tiles" in info else -1
         row = {
             "score": float(self.ret[i]),
-            "length": length,
+            "length": length,  # frames
             "end": end,
+            # share of the track's tiles visited, and mean speed (Box2D units,
+            # sampled once per decision)
+            "tiles": tiles,
+            "track_tiles": track_tiles,
+            "tile_frac": tiles / track_tiles if track_tiles > 0 else float("nan"),
+            "speed_mean": float(self.speed_sum[i] / decisions),
             # Q estimate of the first state vs the discounted return that
             # followed: the gap measures over/underestimation (env units)
             "q_start": float(self.q_start[i]),
             "return_disc": float(self.disc_ret[i]),
-            "q_mean": float(self.q_sum[i] / max(length, 1)),
+            "q_mean": float(self.q_sum[i] / decisions),
+            # frames per action
             **{f"a_{name}": int(c) for name, c in zip(ACTION_NAMES, self.actions[i])},
         }
         self.ret[i] = self.disc_ret[i] = self.q_start[i] = self.q_sum[i] = 0.0
+        self.speed_sum[i] = 0.0
         self.discount[i] = 1.0
-        self.length[i] = 0
+        self.length[i] = self.decisions[i] = 0
         self.actions[i] = 0
         return row
 
@@ -426,7 +524,7 @@ def evaluate(model, eval_env, seeds, gamma, reward_scale):
         actions, max_q = model.act_batch(states, return_q=True)
         states, rewards, terminations, truncations, info = eval_env.step(actions)
         for i in np.flatnonzero(active):
-            tracker.step(i, actions[i], max_q[i], rewards[i])
+            tracker.step(i, actions[i], max_q[i], rewards[i], speed=info["speed"][i])
             if terminations[i] or truncations[i]:
                 rows[i] = {"seed": int(seeds[i]), **tracker.finish(i, terminations[i], info)}
                 active[i] = False
@@ -517,7 +615,7 @@ def train(cfg=None):
     print(f"Run dir: {log.dir}  (device {device}, {cfg.num_envs} envs, "
           f"{cfg.replay_ratio * cfg.num_envs:g} updates per step)")
 
-    env = make_vec_env(cfg.num_envs, cfg.no_progress_steps)
+    env = make_vec_env(cfg.num_envs, cfg.no_progress_steps, cfg.action_repeat)
     eval_env = make_vec_env(cfg.eval_episodes)
     eval_seeds = np.arange(cfg.eval_seed, cfg.eval_seed + cfg.eval_episodes)
     agent = DQNAgent(env.single_action_space.n, env.single_observation_space.shape, cfg)
@@ -562,6 +660,7 @@ def train(cfg=None):
         print(f"  Eval @ {env_steps} steps (episode {completed}): "
               f"mean {scores.mean():.1f} std {scores.std():.1f} "
               f"min {scores.min():.1f} max {scores.max():.1f} laps {laps}/{len(rows)} "
+              f"tiles {np.mean([r['tile_frac'] for r in rows]):.1%} "
               f"({time.time() - t0:.0f}s){tag}")
         return scores
 
@@ -598,10 +697,11 @@ def train(cfg=None):
 
         agent.remember(states[keep], actions[keep], rewards[keep], next_states[keep],
                        stored_dones[keep])
-        env_steps += int(keep.sum())
+        frames = info["frames"] if cfg.action_repeat > 1 else np.ones(cfg.num_envs, dtype=np.int64)
+        env_steps += int(frames[keep].sum())
 
         for i in np.flatnonzero(keep):
-            tracker.step(i, actions[i], max_q[i], rewards[i])
+            tracker.step(i, actions[i], max_q[i], rewards[i], frames[i], info["speed"][i])
             if not dones[i]:
                 continue
             row = tracker.finish(i, terminations[i], info)
@@ -616,7 +716,8 @@ def train(cfg=None):
             if cfg.epsilon_decay_steps is None:
                 agent.decay_epsilon()
             print(f"Episode {completed}\tScore {row['score']:.1f}\tAvg {avg:.1f}\t"
-                  f"Eps {agent.epsilon:.3f}\tLen {row['length']}\t{row['end']}")
+                  f"Eps {agent.epsilon:.3f}\tLen {row['length']}\t"
+                  f"Tiles {row['tile_frac']:.0%}\t{row['end']}")
             if avg > best_train_avg and len(scores_deque) >= 10:
                 best_train_avg = avg
                 log.save_model(agent.model, "best_train_avg.pth")

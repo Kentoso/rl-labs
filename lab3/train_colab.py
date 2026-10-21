@@ -82,55 +82,67 @@ if dqn.device.type == "cuda":
 # Watch `ms_env_wait` vs `ms_update` in `updates.csv` to see whether the loop waits
 # for the envs (CPU) or the updates (GPU).
 #
-# The budget is in env steps: 300k is a screening run. Run 1 (`a5f2758`, baseline-style
-# settings) had an eval mean below 0 at that point.
+# The budget is in env steps (frames). `CONFIGS` holds one config per run, and they
+# run one after another. Current screen: action repeat 4 vs 1 at 100k frames, both
+# with a dueling head and a 200k buffer. With repeat 4, `replay_ratio=0.5` per
+# transition gives the same updates per frame as repeat 1 at 0.125, so both runs get
+# equal compute.
 
 # %% tags=["parameters"]
-cfg = dqn.Config(
-    run_name="screen_fast",
+base = dict(
     out_dir=OUT_DIR,
     seed=0,
     num_envs=max(os.cpu_count() - 2, 1),
     n_episodes=None,
-    total_env_steps=300_000,
+    total_env_steps=100_000,
     no_progress_steps=100,  # None = full 1000-frame training episodes
     bootstrap_truncation=True,  # False = timeouts stored as terminal (baseline)
-    replay_ratio=0.125,
     lr=1e-4,
-    gamma=0.99,
+    gamma=0.99,  # per frame; with action repeat k the target uses gamma ** k
     batch_size=256,
-    buffer_size=50_000,
+    buffer_size=200_000,  # ~11 GB of GPU memory (uint8 state + next_state)
     target_update=500,  # gradient updates
     double_dqn=True,
+    dueling=True,
     reward_scale=0.1,
     max_grad_norm=10.0,  # None disables clipping
     epsilon_start=1.0,
     epsilon_min=0.05,
-    epsilon_decay_steps=150_000,  # None = per-episode decay by epsilon_decay
+    epsilon_decay_steps=50_000,  # None = per-episode decay by epsilon_decay
     epsilon_decay=0.995,
     log_every_updates=500,
-    eval_every_steps=50_000,
+    eval_every_steps=25_000,
     eval_episodes=10,
     eval_seed=10_000,
 )
-cfg
+CONFIGS = [
+    dqn.Config(**base, run_name="duel_ar4", action_repeat=4, replay_ratio=0.5),
+    dqn.Config(**base, run_name="duel_ar1", action_repeat=1, replay_ratio=0.125),
+]
+CONFIGS
 
 # %% [markdown]
 # ## Train
 
 # %%
-run_dir = dqn.train(cfg)
+run_dirs = []
+for cfg in CONFIGS:
+    run_dirs.append(dqn.train(cfg))
 
 # %%
-print(json.dumps(json.load(open(run_dir / "summary.json")), indent=2))
+for run_dir in run_dirs:
+    print(run_dir.name, json.dumps(json.load(open(run_dir / "summary.json")), indent=2))
 
 # %% [markdown]
-# ## Test with the unchanged test script
+# ## Test with the unchanged test script (optional, slow)
 #
-# 50 random tracks, same as the baseline numbers (mean 840.6, std 103.2).
+# 50 random tracks, same as the baseline numbers (mean 840.6, std 103.2). Evals during
+# training already act every frame like the test does.
 
 # %%
-# !python test_car_racing.py "{run_dir}/checkpoints/best.pth" 50
+for run_dir in run_dirs:
+    print(run_dir.name)
+    # !python test_car_racing.py "{run_dir}/checkpoints/best.pth" 50
 
 # %% [markdown]
 # ## Download (when not using Drive)
@@ -141,5 +153,6 @@ if not USE_DRIVE:
 
     from google.colab import files
 
-    archive = shutil.make_archive(str(run_dir), "zip", run_dir)
-    files.download(archive)
+    for run_dir in run_dirs:
+        archive = shutil.make_archive(str(run_dir), "zip", run_dir)
+        files.download(archive)

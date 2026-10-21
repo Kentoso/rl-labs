@@ -253,7 +253,7 @@ Findings:
   each) vs `ms_env_wait` 0.9 ms. 9.5 ms per update is slow for an L4; the likely suspect
   is 12 env worker processes on 12 vCPUs starving the main process that launches kernels.
 
-## 2026-10-20 — Faster experiments: no-progress cut, per-step ε, true terminals (uncommitted)
+## 2026-10-20 — Faster experiments: no-progress cut, per-step ε, true terminals (`b7f4e42`)
 
 Run 1 took 51 minutes and still wasn't converged, which is too slow to try ideas. Every
 piece below is a `Config` flag, so it can be switched off for comparison.
@@ -289,6 +289,116 @@ piece below is a `Config` flag, so it can be switched off for comparison.
 Training scores and `avg100` are now from possibly cut episodes, so they're lower than
 full-episode scores. Compare runs by eval scores. Plan: one 300k-step screening run
 (notebook default), compared against run 1's eval at the same step count.
+
+## 2026-10-20 — Run 2 on Colab L4: `screen_fast` (`b7f4e42`, 300k env steps, 13.5 min)
+
+Greedy eval mean (10 fixed tracks) at equal env steps vs run 1:
+
+| env steps | 50k | 100k | 150k | 200k | 250k | 300k |
+|---|---|---|---|---|---|---|
+| run 1 (`a5f2758`) | −90 (60k) | −8 (108k) | −54 (156k) | −60 (204k) | −45 (252k) | −27 |
+| run 2 | −79 | −51 | −16 | −17 | 312 | **359 ± 94** |
+
+Run 2 at 300k steps is where run 1 was at ~550–650k steps (eval 343–345), so it needs about
+half the samples. 514 of 624 training episodes were cut by `no_progress`; mean episode length
+rose from 281 frames (ε ≈ 0.9) to 951 frames once ε hit 0.05, so the cut stops costing
+anything once the agent drives.
+
+Throughput: 418 env steps/s vs 377 (+11%) with 10 envs instead of 12.
+- `ms_update` 11.8 ms per iteration for 1.25 updates = 9.4 ms per batch-256 update, the
+  same as run 1's 9.4 ms per batch-128 update. Doubling the batch cost nothing, so updates
+  are bound by launch and Python overhead, not by GPU compute.
+- `ms_env_wait` rose from 0.9 to 8.5 ms: one vector step of 10 envs takes ~20 ms on Colab's
+  vCPUs, so the loop is now bound by envs and updates about equally. The starvation
+  hypothesis is unconfirmed: per-update time didn't drop with 2 free CPUs.
+- Clipping still never triggered (max grad norm 0.17).
+
+## 2026-10-21 — Run 3 on Colab L4: `final` (`b7f4e42`, 1.5M env steps, 68.5 min)
+
+Run 2's config with `total_env_steps=1_500_000`.
+
+| env steps | 300k | 600k | 900k | 1.05M | 1.2M (best eval) | 1.25M | 1.5M |
+|---|---|---|---|---|---|---|---|
+| eval mean (10 tracks) | 359 | 582 | 731 | 766 ± 82 | **789 ± 117** | 606 ± 229 | 690 ± 205 |
+
+`test_car_racing.py <ckpt> 50` (unchanged test, local MPS):
+
+| checkpoint | mean | std | min | max |
+|---|---|---|---|---|
+| baseline | 840.6 | 103.2 | 470.4 | 912.7 |
+| `best.pth` (1.2M, eval 789) | 753.7 | 198.5 | −76.0 | 912.3 |
+| `step01050k.pth` (eval 766) | **829.3** | **86.2** | 420.8 | 911.7 |
+
+Findings:
+- Training avg100 rose steadily to 751 at the end, and laps start appearing after
+  ~900k steps. Eval scores, though, swing 600↔790 between consecutive evals after 1M,
+  with per-track minimums down to 260–370. The greedy policy is unstable from one
+  checkpoint to the next, and a bad checkpoint fails badly on some tracks (−76 in the test).
+- **Choosing `best.pth` by the highest mean over 10 eval tracks picks noise.** The
+  checkpoint with the highest eval mean scored 76 lower on the 50-track test than one
+  with a lower eval mean but a much smaller std. Ten tracks with std ~100–200 give a
+  standard error of 30–60 on the mean, about the size of the differences between checkpoints.
+- `step01050k.pth` is within noise of the baseline (−11; SE of the difference ≈ 19), with
+  a lower std (86 vs 103). Not better yet.
+- Q overestimation is mild: training `q_start` 49 vs return 45.5 at the end. |TD| ≥ 1
+  (scaled) still ~0, and max grad norm 1.5, so clipping never triggered.
+- Throughput was steady at 410 env steps/s.
+
+## 2026-10-21 — Action repeat, dueling head, bigger buffer, tile/speed diagnostics (uncommitted)
+
+Run 3's evals at the 1000-frame limit put tile coverage at ~87% (score ≈ 1000 × tile_frac
+− 100), with only 1 of 10 eval tracks finishing a lap. So the remaining gap is mostly that
+the car is **too slow**, plus instability between checkpoints. TD errors are small and Q
+matches the returns, so the CNN doesn't look like the bottleneck.
+
+- **Action repeat** (`action_repeat`, training only): the `ActionRepeat` wrapper holds each
+  action for k frames and returns the summed reward; the target uses `gamma ** k`. Credit
+  assignment spans k× fewer decisions (at γ = 0.99, k = 4: 0.9606 per decision), and the
+  act/update work per frame drops k×. Env steps still count frames (`info["frames"]`), so
+  budgets, ε and evals compare across k. The observation is still `make_env`'s stack of 4
+  consecutive frames, so the policy can act every frame. Evals and `test_car_racing.py`
+  do act every frame, so every eval checks that transfer. Known imprecision: a no-progress
+  cut in the middle of a repeat still discounts by γ^k.
+- **Dueling head** (`dueling`, Wang et al. 2016, arXiv:1511.06581):
+  Q = V(s) + A(s,a) − mean A. Every update trains V(s), which helps when most actions are
+  nearly equal (straights: noop ≈ gas ≈ light steer). The advantage stream keeps the names
+  `fc1`/`fc2`; the value stream is `fc_value1`/`fc_value2`. `QNetwork.load_state_dict`
+  rebuilds the head from the checkpoint's keys, so the unchanged test script (which builds
+  the default network) loads both baseline and dueling checkpoints. Checked: identical
+  outputs after the round trip.
+- **Replay buffer 50k → 200k** (Colab only): 50k transitions is ~50 episodes, so rare
+  situations (hairpins) are forgotten, which fits run 3's eval swings. 200k × 2 stacks ×
+  28 KB ≈ 11 GB on the L4 (24 GB). `Config` default stays 50k for local runs.
+- **Diagnostics:** the `EpisodeInfo` wrapper (training and eval envs, not the test) adds
+  `tiles`, `track_tiles`, `tile_frac` and `speed_mean` to `episodes.csv` and `evals.csv`.
+  Episode `length` and the `a_*` action counts are in frames. Eval prints show mean tile coverage.
+- Notebook: `CONFIGS` runs several configs in sequence. Screen = 100k frames, ε decay over
+  50k, evals every 25k: `duel_ar4` (repeat 4, replay ratio 0.5 = same updates per frame as
+  repeat 1 at 0.125) vs `duel_ar1`.
+
+## 2026-10-21 — Runs 4–5, local MPS: action repeat 4 vs 1 (100k frames each)
+
+Both runs: dueling, 10 envs, buffer 100k (never fills in 100k frames, so it behaves the
+same as 200k), ε 1 → 0.05 over 50k frames, about 12k updates each (same updates per frame).
+
+| eval mean (10 tracks) | 25k | 50k | 75k | 100k |
+|---|---|---|---|---|
+| `duel_ar4` (repeat 4, rr 0.5) | 197 | 391 | 658 | **750 ± 85** (tiles 85%) |
+| `duel_ar1` (repeat 1, rr 0.125) | −64 | −85 | −78 | 9 ± 104 (tiles 11%) |
+| run 3 (`final`, for reference) | — | −79 | −16 (150k) | −51 |
+
+`test_car_racing.py duel_ar4/best.pth 50`: **mean 780.8, std 92.1, min 562.6, max 902.0**.
+That's after 100k frames and 9 minutes on the Mac. Run 3 needed 1.05M frames and 50 min
+on the L4 to reach 829 / 86.
+
+- **Action repeat is the big win**: at equal frames and equal updates, ar4 is ~740 points
+  ahead at 100k. The policy transfers to acting every frame: evals and the test both act
+  every frame, and the test min (563) is higher than any run 3 checkpoint's.
+- The eval mean speed for ar4 rose from 37 to 44 as it learned; ar1 at 100k is still
+  learning to leave the start.
+- Throughput, local: ar4 371 frames/s and env-bound (`ms_env_wait` 13.6 vs `ms_update`
+  11.6 per iteration of 40 frames); ar1 250 frames/s. ar1's last eval took 301 s instead
+  of 10 s, probably the Mac being busy or sleeping, which also lowers its frames/s.
 
 ## Investigated, not adopted
 
