@@ -667,6 +667,34 @@ faster propagation).
 **Next:** notebook config `g99_n3_300k`: run 9 with γ 0.99 (n = 3, k = 4, `target_update=2000`,
 lr 1e-4, seed 0, 300k frames), compared with run 7 (γ 0.99, n = 1) on the same tracks.
 
+**Run 10, Colab L4, `g99_n3_300k` (`80e0fe6`, 300k frames, 23 min):** differs from run 7's
+first 300k only in n = 3. Paired on the same 30 eval tracks:
+
+| Frames | Run 10 (γ .99, n 3) | Run 9 (γ .995, n 3) | Run 7 (γ .99, n 1) | Run 10 − run 7 (± SE) | q_start / return_disc |
+|--------|-------|-------|-------|-------------|-------------|
+| 50k    | 333.4 | 243.6 | 26.6  | +307 ± 28   | 12.1 / 37.0 |
+| 75k    | 543.7 | 490.6 | 143.3 | +400 ± 51   | 12.3 / 35.0 |
+| 100k   | 629.6 | 488.4 | 472.6 | +157 ± 49   | 17.9 / 33.3 |
+| 150k   | 653.4 | 702.1 | 602.1 | +51 ± 55    | 22.7 / 34.7 |
+| 200k   | **749.2** (best) | 609.3 | 743.6 | +6 ± 22 | 28.4 / 40.9 |
+| 250k   | 733.4 | 668.0 | 781.7 | −48 ± 23    | 32.0 / 38.2 |
+| 300k   | 739.6 | 652.8 | 730.3 | +9 ± 22     | 36.4 / 38.4 |
+
+`test_car_racing.py best.pth 50`: **mean 750.3, std 133.2, min 378.3, max 903.8** (run 7: 798.4,
+run 9: 645.6, baseline rerun: 819.0).
+
+- **n = 3 speeds up early learning** (third run in a row: +300–400 over run 7 at 50–75k), but
+  **doesn't raise the plateau**: from 200k on run 10 is level with run 7 (−120 to +9 per eval,
+  ~730–750 vs ~730–780).
+- **γ 0.995 was what hurt run 9:** with γ 0.99, Q reaches the discounted return (36 vs 38 at
+  300k) and the late evals are 80–90 above run 9.
+- Test 750.3 is 48 below run 7's 798.4, but with SE ≈ 22 for the difference and one seed
+  per config that's within ~2 SE; best-checkpoint selection on 30 tracks adds its own noise.
+
+**Decision:** keep `n_step` available (useful for short budgets / faster screening), but n = 1
+is the default and the notebook config; γ stays 0.99. The plateau at ~750–780 eval isn't a
+propagation problem.
+
 ## Investigated, not adopted
 
 ### Mixed precision on MPS
