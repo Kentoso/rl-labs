@@ -76,12 +76,13 @@ if dqn.device.type == "cuda":
 # %% [markdown]
 # ## Config
 #
-# Budgets, ε, lr and evals count frames. Each training decision holds its action for k = 4
-# frames (`action_repeat_schedule` can step k down, but k = 1 hurt in run 7); evals and the
-# test act every frame. One-step targets with γ 0.99 per frame (3-step returns only sped up
-# early learning, run 10; γ 0.995 plateaued lower, run 9). `updates_per_frame` keeps the compute per frame the same at every k. `num_envs` leaves
-# 2 CPUs free for the main process. `CONFIGS` holds one config per run, and they run one
-# after another.
+# Budgets, ε, lr and evals count frames. Each training decision holds its action for k = 2
+# frames: a k = 4 policy re-deciding every 2 frames at eval scores as well as every frame and
+# far better than holding 4 (diagnostic after run 10); k = 1 hurt in run 7. Evals and the test
+# act every frame. One-step targets with γ 0.99 per frame (3-step returns only sped up early
+# learning, run 10; γ 0.995 plateaued lower, run 9). `updates_per_frame` keeps the compute per
+# frame the same at every k. `num_envs` leaves 2 CPUs free for the main process. `CONFIGS`
+# holds one config per run, and they run one after another.
 
 # %% tags=["parameters"]
 base = dict(
@@ -90,7 +91,7 @@ base = dict(
     num_envs=max(os.cpu_count() - 2, 1),
     total_env_steps=300_000,
     # (from_frame, k): k frames per decision from that frame on
-    action_repeat_schedule=((0, 4),),
+    action_repeat_schedule=((0, 2),),
     no_progress_steps=100,  # None = full 1000-frame training episodes
     updates_per_frame=0.125,
     lr=1e-4,
@@ -113,8 +114,8 @@ base = dict(
     eval_seed=10_000,
 )
 CONFIGS = [
-    dqn.Config(**base, run_name="g99_n1_300k"),
-    # dqn.Config(**{**base, "seed": 1}, run_name="g99_n1_300k_seed1"),
+    dqn.Config(**base, run_name="g99_n1_k2_300k"),
+    dqn.Config(**{**base, "seed": 1}, run_name="g99_n1_k2_300k_seed1"),
 ]
 CONFIGS
 

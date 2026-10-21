@@ -695,6 +695,34 @@ run 9: 645.6, baseline rerun: 819.0).
 is the default and the notebook config; γ stays 0.99. The plateau at ~750–780 eval isn't a
 propagation problem.
 
+## 2026-10-21 — Diagnostic: does the 4-frame hold make the policy too committed?
+
+Question: training holds each action for k = 4 frames, so Q values "hold a for 4 frames"; the
+test acts every frame. Run 7's `best.pth` (250k frames, trained at k = 4) evaluated on the same
+30 eval tracks with each greedy action held for k frames at eval time (local MPS):
+
+| Eval hold | Mean  | Std   | Min   | Laps | Tiles | Speed | vs k = 1 (paired, ± SE) |
+|-----------|-------|-------|-------|------|-------|-------|-------------------------|
+| k = 1     | 749.6 | 160.1 | 272.1 | 5/30 | 84.8% | 44.1  | —                       |
+| k = 2     | 754.7 | 129.3 | 403.9 | 3/30 | 85.3% | 44.3  | +5 ± 20 (14/30 better)  |
+| k = 4     | 592.9 | 227.1 | −87.4 | 1/30 | 69.3% | 38.2  | −157 ± 40 (3/30 better) |
+
+- **Not too committed:** holding for 4 frames at eval, the way it was trained, is far worse than
+  re-deciding every frame. The policy relies on correcting between its 4-frame decisions,
+  which its Q-values never modelled.
+- Re-deciding every 2 frames is as good as every frame, so finer control than 2 frames isn't
+  used.
+- Suggests training at k = 2: it matches the control rate the policy actually benefits from,
+  without k = 1's collapse.
+- Side finding: the same checkpoint on the same tracks scored 781.7 in the Colab eval (CUDA)
+  and 749.6 here (MPS). Float differences flip close greedy choices, so one 30-track eval is
+  ±~30 even for a fixed checkpoint; best-checkpoint selection is partly noise.
+
+**Next:** notebook configs `g99_n1_k2_300k` and `g99_n1_k2_300k_seed1`: run 7's config (γ 0.99,
+n = 1, `target_update=2000`, constant lr 1e-4) at k = 2 for 300k frames, seeds 0 and 1.
+`updates_per_frame` 0.125 keeps the compute per frame (= 0.25 updates per transition); the
+100k-transition buffer now covers 200k frames instead of 400k.
+
 ## Investigated, not adopted
 
 ### Mixed precision on MPS
