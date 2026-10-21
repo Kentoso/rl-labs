@@ -522,7 +522,7 @@ baseline's 840.6 / 103.2 (SE of the difference ≈ 24, so the gap is real) and b
   batch-256 update**, vs 9.4 ms with AMP (runs 1–3). The loop is now env-bound: `ms_env_wait`
   48 ms per iteration (10 envs × 4 frames), 430 frames/s.
 
-## 2026-10-21 — Action-repeat schedule, slower target, lr decay (uncommitted)
+## 2026-10-21 — Action-repeat schedule, slower target, lr decay (`a54c131`)
 
 Aimed at run 6's plateau (eval ~750 from 250k frames on, Q drifting 30% above the returns,
 a few tracks failing). Three changes in `dqn_car_racing_improved.py`, all configurable, run
@@ -548,6 +548,89 @@ one of them; it's compared with run 6 at matching frame counts.
   switch), then linear to
   1e-5 at the end of the budget. Holding it first keeps the fast early learning.
 - New log columns: `action_repeat` (episodes, updates) and `lr` (updates).
+
+## 2026-10-21 — Run 7 on Colab L4: `ar_sched_1m` (`a54c131`, 1M frames, 77 min)
+
+Config as in the notebook: k schedule 4 → 3 (300k) → 2 (500k) → 1 (750k), `target_update=2000`,
+lr 1e-4 held to 300k then linear to 1e-5, everything else as run 6. Evals: 30 fixed tracks,
+acting every frame.
+
+| Frames | k | Eval mean | Run 6 eval | q_start vs return_disc (run 6) |
+|--------|---|-----------|------------|--------------------------------|
+| 100k   | 4 | 472.6     | 675.3      | 11.9 vs 39.6 (23.6 vs 42.2)    |
+| 250k   | 4 | **781.7** (best) | 754.5 | 19.8 vs 45.9 (47.0 vs 40.2) |
+| 300–475k | 3 | 702–778 | 680–793    | 22–30 vs 38–46                 |
+| 500–750k | 2 | 684–755 | —          | 31–39 vs 42–46                 |
+| 775k–1M  | 1 | **483–605** | —      | 41–42 vs 38–42                 |
+
+- **Slower target removed the Q overestimation.** Q now climbs to the discounted return from
+  below and settles at it (42 vs 39 at 1M) instead of overshooting (run 6: 57 vs 43). Cost:
+  slower early learning (473 vs 675 at 100k).
+- **k = 3 and k = 2 didn't lift the plateau** (~700–780, same as run 6 at k = 4).
+- **k = 1 collapsed**: eval 725 → 483 within 50k frames, eval speed 43 → 29, training
+  episodes hit the no-progress cut again (21 of 56 at 800–850k vs ~2 of 50 before). Action mix
+  barely changed (brake 1.3% → 3.5%). Likely causes, not separated: the bootstrap chain per
+  decision is 4× longer at k = 1, the 100k-transition buffer covers only 100k frames instead of
+  ~400k, and lr was already down to ~3e-5, so it couldn't re-adapt.
+- Speed: ~430 frames/s at k = 4, ~380 at k = 1 (more `act` calls per frame); 7.7 ms/update.
+
+`test_car_racing.py <ckpt> 50` (unchanged test, local MPS):
+
+| Checkpoint            | Mean      | Std  | Min   | Max   |
+|-----------------------|-----------|------|-------|-------|
+| `best.pth` (250k, k=4) | **798.4** | 85.3 | 619.9 | 911.7 |
+| `step00475k.pth` (k=3) | 792.3     | 98.2 | 372.0 | 907.5 |
+| baseline (reported)   | 840.6     | 103.2 | 470.4 | 912.7 |
+| baseline (rerun locally, same checkpoint) | 819.0 | 136.7 | 394.9 | 910.3 |
+
+Best test result so far (run 5: 780.8, run 6: 769.1) and the best worst case (min 619.9).
+**Baseline rerun:** `checkpoint_CarRacing-v3_best.pth` tested again gives 819.0, 21.6 below the
+reported 840.6. The test doesn't seed its tracks, so the same checkpoint moves by ~20 between
+runs. Against the rerun, run 7 is 20.6 below with a standard error of the difference of
+√(85.3²/50 + 136.7²/50) ≈ 23: **within noise**, not a clear loss as earlier comparisons
+against 840.6 suggested (that line in run 6's entry also overstated it). Run 7 has a much
+smaller spread (std 85 vs 137, min 620 vs 395). The 250k-frame best checkpoint again comes from the k = 4 phase; the extra 750k frames, the
+k schedule and the lr decay added nothing. The test uses random tracks, so the 29-point gain over
+run 6 (different seeds, ~1.5–2 SE) is suggestive, not proven.
+
+**Proposed (not yet decided):** drop the k = 1 phase (harmful) and the schedule (no gain); keep
+`target_update=2000` (fixes Q drift, best test so far).
+
+## 2026-10-21 — γ 0.995 + 3-step returns
+
+Run 7 showed the score is capped by speed: at its best eval, 24 of 30 tracks time out at 85%
+of the tiles, only 6 finish a lap, and speed correlates 0.67 with score. Idea: let consequences
+beyond ~100 frames count (spin-outs, corner setup) and propagate reward faster.
+
+- **`gamma` 0.99 → 0.995 per frame:** horizon ~100 → ~200 frames.
+- **`n_step` (new, default 1):** `NStepCollector` keeps each env's last n decisions, stores
+  (s_t, a_t, Σ per-frame-discounted rewards of n decisions, s_t+n), and the target discounts by
+  γ^(frames of all n decisions); at k = 4 and n = 3 that's 12 frames per bootstrap. When an
+  episode ends, all pending transitions are flushed with the final state (bootstrapping on
+  truncations, zero on real terminals). n = 1 reproduces the old behaviour exactly. Intermediate
+  actions are the behaviour policy's (ε-greedy, older weights); no correction, as in Rainbow.
+
+**Run 8, local MPS, `g995_n3_100k`:** run 7's config over its first 100k frames (k = 4,
+`target_update=2000`, lr 1e-4, seed 0, 10 envs) with γ 0.995 and n = 3; 6.6 min. Same 30 eval
+tracks as run 7, so the comparison is paired per track:
+
+| Frames | Run 8 | Run 7 | Run 6 (target 500) | Run 8 − run 7 (paired, ± SE) | q_start / return_disc, run 8 vs run 7 |
+|--------|-------|-------|--------------------|------------------------------|---------------------------------------|
+| 25k    | −20.7 | −61.2 | 4.7   | +40 ± 14  | 9.7/26.6 vs 6.9/12.2  |
+| 50k    | 298.6 | 26.6  | 279.1 | +272 ± 44 | 11.5/79.8 vs 6.6/24.7 |
+| 75k    | 606.3 | 143.3 | 525.7 | +463 ± 52 | 13.4/95.3 vs 8.4/32.8 |
+| 100k   | **729.4** | 472.6 | 675.3 | **+257 ± 57** | 21.5/108.2 vs 11.9/39.6 |
+
+- Much faster learning than run 7 with the same slow target: 729 vs 473 at 100k (7 laps vs 0,
+  tiles 83% vs 57%, eval speed 46 vs 32), also ahead of run 6's faster target.
+- Q lags the return far more (21.5 vs 108; discounted returns are ~2.7× larger at γ 0.995 and
+  the target syncs every 2000 updates), so the values are still catching up at 100k.
+- One seed only; seed-to-seed spread at 100k has been ~100, the gap here is 257.
+- Throughput 380–400 frames/s locally; the n-step bookkeeping isn't visible in it.
+
+**Next:** notebook config `g995_n3_500k` on Colab: k = 4 throughout (schedule dropped after
+run 7), constant lr 1e-4, `target_update=2000`, γ 0.995, n = 3, 500k frames, to see whether
+the plateau moves above run 7's ~780 eval; then the official test.
 
 ## Investigated, not adopted
 

@@ -20,6 +20,7 @@ ff03938); see CHANGELOG.md for the evidence behind each change:
   - rewards are scaled by 0.1 for learning (keeps TD errors in Huber's
     quadratic part); scores and logs stay in env units
   - Double DQN target (van Hasselt et al. 2016, arXiv:1509.06461)
+  - optional n-step returns over decisions (n_step, default 1)
   - replay buffer on the device, batched acting, env stepping overlapped
     with the updates, fused Adam, MPS support
   - greedy evals on fixed tracks pick best.pth; every run writes CSV logs
@@ -266,6 +267,9 @@ class Config:
     lr_end: float | None = None
     lr_decay_start: int = 0
     gamma: float = 0.99  # per frame
+    # decisions per stored transition: sums the rewards of n decisions and
+    # bootstraps after them (1 = one-step targets)
+    n_step: int = 1
     batch_size: int = 256
     buffer_size: int = 100_000  # transitions
     target_update: int = 500  # gradient updates
@@ -281,6 +285,45 @@ class Config:
     eval_episodes: int = 30
     eval_envs: int = 10  # eval episodes run in rounds of this many
     eval_seed: int = 10_000  # eval tracks: eval_seed .. eval_seed + eval_episodes - 1
+
+
+class NStepCollector:
+    """Turns each env's per-decision transitions into n-step ones.
+
+    The emitted reward is the per-frame discounted sum over up to n decisions
+    and `frames` is their total, so the target discounts by gamma ** frames.
+    When an episode ends, every pending transition is emitted with the final
+    state (bootstrapping unless it was a real terminal)."""
+
+    def __init__(self, num_envs, n, gamma):
+        self.n = n
+        self.gamma = gamma
+        self.pending = [deque() for _ in range(num_envs)]
+
+    def _emit(self, out, pending, next_state, terminated):
+        ret, frames = 0.0, 0
+        for _, _, reward, f in pending:
+            ret += self.gamma ** frames * reward
+            frames += f
+        state, action = pending[0][:2]
+        out.append((state, action, ret, next_state, terminated, frames))
+        pending.popleft()
+
+    def add(self, envs, states, actions, rewards, next_states, terminations, dones, frames):
+        """Rows j belong to env envs[j]. Returns the ready transitions as arrays
+        (states, actions, rewards, next_states, terminations, frames), or None."""
+        out = []
+        for j, i in enumerate(envs):
+            pending = self.pending[i]
+            pending.append((states[j], actions[j], float(rewards[j]), int(frames[j])))
+            if dones[j]:
+                while pending:
+                    self._emit(out, pending, next_states[j], terminations[j])
+            elif len(pending) == self.n:
+                self._emit(out, pending, next_states[j], False)
+        if not out:
+            return None
+        return tuple(np.array(col) for col in zip(*out))
 
 
 class DQNAgent:
@@ -549,6 +592,7 @@ def train(cfg=None):
     eval_seeds = np.arange(cfg.eval_seed, cfg.eval_seed + cfg.eval_episodes)
     agent = DQNAgent(env.single_action_space.n, env.single_observation_space.shape, cfg)
     tracker = EpisodeTracker(cfg.num_envs, cfg.gamma, cfg.reward_scale)
+    n_step = NStepCollector(cfg.num_envs, cfg.n_step, cfg.gamma)
 
     scores_deque = deque(maxlen=100)
     best_eval = {"mean": -np.inf, "env_steps": None}
@@ -629,8 +673,10 @@ def train(cfg=None):
         # a truncated episode didn't end in the MDP, so its target still
         # bootstraps from the next state; only real terminals zero it
         frames = info["frames"]
-        agent.remember(states[keep], actions[keep], rewards[keep], next_states[keep],
-                       terminations[keep], frames[keep])
+        ready = n_step.add(np.flatnonzero(keep), states[keep], actions[keep], rewards[keep],
+                           next_states[keep], terminations[keep], dones[keep], frames[keep])
+        if ready is not None:
+            agent.remember(*ready)
         env_steps += int(frames[keep].sum())
         update_credit += cfg.updates_per_frame * frames[keep].sum()
 

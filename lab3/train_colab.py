@@ -76,10 +76,10 @@ if dqn.device.type == "cuda":
 # %% [markdown]
 # ## Config
 #
-# Budgets, ε, lr and evals count frames. Each training decision holds its action for k
-# frames, with k stepping down on `action_repeat_schedule` (coarse control while learning
-# the game, faster reactions later); evals and the test act every frame.
-# `updates_per_frame` keeps the compute per frame the same at every k. `num_envs` leaves
+# Budgets, ε, lr and evals count frames. Each training decision holds its action for k = 4
+# frames (`action_repeat_schedule` can step k down, but k = 1 hurt in run 7); evals and the
+# test act every frame. Targets are 3-step returns over decisions (12 frames at k = 4) with
+# γ 0.995 per frame (run 8). `updates_per_frame` keeps the compute per frame the same at every k. `num_envs` leaves
 # 2 CPUs free for the main process. `CONFIGS` holds one config per run, and they run one
 # after another.
 
@@ -88,15 +88,16 @@ base = dict(
     out_dir=OUT_DIR,
     seed=0,
     num_envs=max(os.cpu_count() - 2, 1),
-    total_env_steps=1_000_000,
+    total_env_steps=500_000,
     # (from_frame, k): k frames per decision from that frame on
-    action_repeat_schedule=((0, 4), (300_000, 3), (500_000, 2), (750_000, 1)),
+    action_repeat_schedule=((0, 4),),
     no_progress_steps=100,  # None = full 1000-frame training episodes
     updates_per_frame=0.125,
     lr=1e-4,
-    lr_end=1e-5,  # linear decay to this at the end of the budget; None = constant lr
-    lr_decay_start=300_000,
-    gamma=0.99,  # per frame; each transition is discounted by gamma ** its frames
+    lr_end=None,  # linear decay to this at the end of the budget; None = constant lr
+    lr_decay_start=0,
+    gamma=0.995,  # per frame; each transition is discounted by gamma ** its frames
+    n_step=3,  # decisions summed per target before bootstrapping
     batch_size=256,
     buffer_size=100_000,  # transitions (~5.6 GB on the GPU)
     target_update=2000,  # gradient updates (= 16k frames at 0.125 updates per frame)
@@ -112,7 +113,7 @@ base = dict(
     eval_seed=10_000,
 )
 CONFIGS = [
-    dqn.Config(**base, run_name="ar_sched_1m"),
+    dqn.Config(**base, run_name="g995_n3_500k"),
 ]
 CONFIGS
 
