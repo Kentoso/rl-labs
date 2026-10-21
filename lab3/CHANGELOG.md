@@ -723,6 +723,71 @@ n = 1, `target_update=2000`, constant lr 1e-4) at k = 2 for 300k frames, seeds 0
 `updates_per_frame` 0.125 keeps the compute per frame (= 0.25 updates per transition); the
 100k-transition buffer now covers 200k frames instead of 400k.
 
+## 2026-10-21 — Checkpoint re-selection and paired comparison with the baseline (100 tracks)
+
+Single 30-track evals are ±~30 (see the diagnostic above) and the official test moves ~20 between
+reruns of the same checkpoint, so candidates were re-evaluated on 100 fresh tracks (seeds
+20 000–20 099, disjoint from the 30 training-eval tracks), greedy, acting every frame, local MPS.
+The baseline checkpoint ran on the same tracks, so differences are paired per track.
+
+| Checkpoint | Mean | Std | Min | Laps | − baseline (paired, ± SE) | Tracks better |
+|------------|------|-----|-----|------|---------------------------|---------------|
+| baseline `checkpoint_CarRacing-v3_best.pth` | 797.3 | 167.4 | 319.6 | **39/100** | — | — |
+| run 3 `step01050k.pth` (k = 1, 1.05M frames) | **821.5** | 102.4 | 355.5 | 20/100 | **+24.2 ± 12.9** | 30 |
+| run 7 `step00425k.pth` | 791.1 | 112.2 | 351.4 | 13/100 | −6.1 ± 13.9 | 24 |
+| run 7 `step00375k.pth` | 784.9 | 105.6 | 398.5 | 13/100 | −12.3 ± 15.6 | 25 |
+| run 7 `step00250k.pth` (= `best.pth`) | 782.2 | 117.3 | 310.1 | 17/100 | −15.1 ± 14.6 | 27 |
+| run 7 `step00475k.pth` | 777.3 | 106.3 | 369.1 | 10/100 | −20.0 ± 14.3 | 29 |
+| run 7 `step00275k.pth` | 770.0 | 122.4 | 234.3 | 14/100 | −27.2 ± 14.4 | 24 |
+| run 7 `step00225k.pth` | 756.3 | 119.7 | 303.2 | 8/100 | −41.0 ± 15.2 | 25 |
+
+- Run 7's checkpoints from 250k to 475k are all ~780–790: the 30-track pick (250k) was fine,
+  the policy is flat on the plateau. They tie the baseline (−6 to −20, ~1 SE).
+- **The baseline is fast but fragile, ours are steady but slow:** the baseline finishes 39 laps
+  vs 10–20 and is better on ~70–75 of 100 tracks, but fails harder where it fails (std 167 vs
+  102–122). Our checkpoints win on the mean only by avoiding those failures.
+- Run 3's `step01050k.pth` is the only candidate ahead: +24 ± 13 (~1.9 SE), suggestive.
+
+**Decision:** the submitted checkpoint is the candidate with the best paired mean over these
+100 tracks (currently run 3's `step01050k.pth`); the k = 2 runs get the same evaluation.
+The report presents two results: run 3's `step01050k.pth` as the **score winner** (+24 ± 13
+paired, submitted) and run 7's `step00250k.pth` as the **training-speed winner** (ties the
+baseline, −15 ± 15, after 250k frames and 19 min on the L4 vs ~50 min / 1.05M frames for run 3).
+
+## 2026-10-21 — Runs 11–12 on Colab L4: k = 2 (`7480ec0`, 300k frames, 2 seeds, 23 min each)
+
+Run 7's config (γ 0.99, n = 1, `target_update=2000`, constant lr 1e-4) at k = 2, seeds 0 and 1.
+Same 30 eval tracks as run 7, paired:
+
+| Frames | Run 11 (seed 0) | Run 12 (seed 1) | Run 7 (k = 4) | q_start / return_disc, runs 11 / 12 |
+|--------|-----------------|-----------------|---------------|-------------------------------------|
+| 100k   | −52.1 | −2.2  | 472.6 | 6.1/13.3 · 6.3/20.3 |
+| 200k   | 134.3 | 311.9 | 743.6 | 10.1/26.8 · 11.8/28.7 |
+| 250k   | 289.1 | 432.4 | 781.7 | 10.0/29.4 · 11.9/39.0 |
+| 300k   | 299.5 | **508.1** (best) | 730.3 | 10.9/29.6 · 13.7/41.7 |
+
+Best evals: 310.7 (run 11, 275k) and 508.1 (run 12, 300k), both 0/30 laps, tiles 41% / 61%;
+169–609 below run 7 at every eval from 75k on, in both seeds.
+
+- **k = 2 learns far slower:** both seeds stay near zero until ~150k frames, while k = 4 is at 470
+  by 100k. At 300k they're at about run 7's 100k level and still rising.
+- Q lags the return badly (11–14 vs 30–42): with one decision per 2 frames the bootstrap chain to
+  the same horizon is twice as long, and the target syncs every 2000 updates = 16k frames.
+- So the hold diagnostic (the k = 4 policy *uses* 2-frame corrections) doesn't translate into
+  training at k = 2 being better at this budget; learning speed dominates. Run 3 shows k = 1 can
+  reach a good score, but needs ~1M frames.
+- Not tested on the 100 tracks or the official test: 220+ below run 7 on the same tracks.
+
+**Decision:** k = 4 stays; the notebook goes back to k = 4. Report: run 3 is the score winner,
+run 7 the training-speed winner.
+
+## 2026-10-21 — Submitted checkpoints and report
+
+- `checkpoint_CarRacing-v3_run3_score.pth` = run 3 `step01050k.pth` (score winner, submitted).
+- `checkpoint_CarRacing-v3_run7_fast.pth` = run 7 `step00250k.pth` (training-speed winner).
+- Both load into the unchanged `QNetwork`, so `test_car_racing.py <file> 50` runs them directly.
+- `report/main.typ` (+ `main.pdf`, `img/`): the report, structured as the epochs of this log.
+
 ## Investigated, not adopted
 
 ### Mixed precision on MPS
