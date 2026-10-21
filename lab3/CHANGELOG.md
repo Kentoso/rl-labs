@@ -628,8 +628,8 @@ tracks as run 7, so the comparison is paired per track:
 - One seed only; seed-to-seed spread at 100k has been ~100, the gap here is 257.
 - Throughput 380–400 frames/s locally; the n-step bookkeeping isn't visible in it.
 
-**Next:** notebook config `g995_n3_500k` on Colab: k = 4 throughout (schedule dropped after
-run 7), constant lr 1e-4, `target_update=2000`, γ 0.995, n = 3, 500k frames, to see whether
+**Next:** notebook config `g995_n3_300k` on Colab: k = 4 throughout (schedule dropped after
+run 7), constant lr 1e-4, `target_update=2000`, γ 0.995, n = 3, 300k frames, to see whether
 the plateau moves above run 7's ~780 eval; then the official test.
 
 ## Investigated, not adopted

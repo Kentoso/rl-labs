@@ -88,7 +88,7 @@ base = dict(
     out_dir=OUT_DIR,
     seed=0,
     num_envs=max(os.cpu_count() - 2, 1),
-    total_env_steps=500_000,
+    total_env_steps=300_000,
     # (from_frame, k): k frames per decision from that frame on
     action_repeat_schedule=((0, 4),),
     no_progress_steps=100,  # None = full 1000-frame training episodes
@@ -113,7 +113,7 @@ base = dict(
     eval_seed=10_000,
 )
 CONFIGS = [
-    dqn.Config(**base, run_name="g995_n3_500k"),
+    dqn.Config(**base, run_name="g995_n3_300k"),
 ]
 CONFIGS
 
