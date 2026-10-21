@@ -344,7 +344,7 @@ Findings:
   (scaled) still ~0, and max grad norm 1.5, so clipping never triggered.
 - Throughput was steady at 410 env steps/s.
 
-## 2026-10-21 — Action repeat, dueling head, bigger buffer, tile/speed diagnostics (uncommitted)
+## 2026-10-21 — Action repeat, dueling head, bigger buffer, tile/speed diagnostics (`632f877`)
 
 Run 3's evals at the 1000-frame limit put tile coverage at ~87% (score ≈ 1000 × tile_frac
 − 100), with only 1 of 10 eval tracks finishing a lap. So the remaining gap is mostly that
@@ -400,7 +400,7 @@ on the L4 to reach 829 / 86.
   11.6 per iteration of 40 frames); ar1 250 frames/s. ar1's last eval took 301 s instead
   of 10 s, probably the Mac being busy or sleeping, which also lowers its frames/s.
 
-## 2026-10-21 — `dqn_car_racing_improved.py`: baseline + only the proven changes (uncommitted)
+## 2026-10-21 — `dqn_car_racing_improved.py`: baseline + only the proven changes (`2dcc133`)
 
 A second training script, copied from the upstream baseline (`ff03938`) with only the
 changes the runs above support. `dqn_car_racing.py` stays as the experiments sandbox;
@@ -501,6 +501,53 @@ On all 30 tracks, new + /10 + DDQN: −1 / 496 / 606 / **704**, min 370 at 100k,
 - **Decision:** `dqn_car_racing_improved.py` keeps reward scale /10 and Double DQN (both on by
   default) and stays without dueling. `duel_ar4` is one seed, and
   nothing yet shows how much a second seed of the same config would vary.
+
+## 2026-10-21 — Run 6 on Colab L4: `ar4_500k` (`2dcc133`, `dqn_car_racing_improved.py`, 500k frames, 38 min)
+
+| eval mean (30 tracks) | 100k | 150k | 200k | 250k | 300k | 375k | 475k (best) | 500k |
+|---|---|---|---|---|---|---|---|---|
+| mean | 675 | 706 | 710 | 755 | 680 | 771 | **793 ± 165** | 757 |
+| laps / 30 | 1 | 3 | 2 | 7 | 5 | 10 | 11 | 9 |
+
+`test_car_racing.py best.pth 50`: **mean 769.1, std 136.4, min 424.5, max 917.2**, below the
+baseline's 840.6 / 103.2 (SE of the difference ≈ 24, so the gap is real) and below run 3's
+`step01050k.pth` (829.3).
+
+- **Plateau from ~250k frames:** eval mean stays at 680–790 and tile coverage at ~0.85–0.9,
+  with 5–11 of 30 tracks finishing a lap. Every eval has a few tracks failing (min 290–440).
+- **Overestimation grows:** eval `q_start` climbs steadily (24 at 100k → 57 at 500k) while
+  the actual discounted return stays flat at ~40–47. That's ~30% too high at the end even with
+  Double DQN, in the plateau phase. In the validation runs (100k) Q still underestimated.
+- **Throughput: dropping AMP sped updates up** — `ms_update` 28 ms per 5 updates = **5.7 ms per
+  batch-256 update**, vs 9.4 ms with AMP (runs 1–3). The loop is now env-bound: `ms_env_wait`
+  48 ms per iteration (10 envs × 4 frames), 430 frames/s.
+
+## 2026-10-21 — Action-repeat schedule, slower target, lr decay (uncommitted)
+
+Aimed at run 6's plateau (eval ~750 from 250k frames on, Q drifting 30% above the returns,
+a few tracks failing). Three changes in `dqn_car_racing_improved.py`, all configurable, run
+together in one 1M-frame Colab run (`ar_sched_1m`), so the run can't attribute the effect to
+one of them; it's compared with run 6 at matching frame counts.
+
+- **Action-repeat schedule** (`action_repeat_schedule`, replaces `action_repeat`): a
+  curriculum, coarse control while the agent learns the game and faster reactions later.
+  Notebook: k = 4 until 300k frames (run 6 plateaued at ~250k), 3 until 500k, 2 until 750k,
+  1 until 1M, so the last phase trains exactly as the test acts. k changes in the running envs through
+  `env.set_attr("k", k)` between `step_wait` and the next `step_async` (checked: frames per
+  step follow 4 → 2 → 1).
+  - The buffer now stores **γ^frames per transition** and the target uses it, because
+    transitions from different k sit in the buffer together. This also fixes the old
+    imprecision of a no-progress cut in the middle of a repeat.
+  - Q-values stay comparable across k because γ is applied per frame.
+  - `replay_ratio` (per transition) → **`updates_per_frame=0.125`** (the validated 0.5 × 1/4),
+    so k = 1 doesn't quadruple the compute per frame. Update credit is now earned by the
+    frames actually run.
+- **Slower target:** `target_update` 500 → **2000** updates (16k frames between syncs at any k),
+  against the overestimation drift.
+- **lr decay** (`lr_end`, `lr_decay_start`): held at 1e-4 until 300k frames (the first k
+  switch), then linear to
+  1e-5 at the end of the budget. Holding it first keeps the fast early learning.
+- New log columns: `action_repeat` (episodes, updates) and `lr` (updates).
 
 ## Investigated, not adopted
 

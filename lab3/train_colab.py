@@ -76,9 +76,10 @@ if dqn.device.type == "cuda":
 # %% [markdown]
 # ## Config
 #
-# Budgets, ε and evals count frames. Each training decision holds its action for
-# `action_repeat` frames; evals and the test act every frame. `replay_ratio` is gradient
-# updates per stored transition (0.5 × 1/4 = 0.125 updates per frame). `num_envs` leaves
+# Budgets, ε, lr and evals count frames. Each training decision holds its action for k
+# frames, with k stepping down on `action_repeat_schedule` (coarse control while learning
+# the game, faster reactions later); evals and the test act every frame.
+# `updates_per_frame` keeps the compute per frame the same at every k. `num_envs` leaves
 # 2 CPUs free for the main process. `CONFIGS` holds one config per run, and they run one
 # after another.
 
@@ -87,15 +88,18 @@ base = dict(
     out_dir=OUT_DIR,
     seed=0,
     num_envs=max(os.cpu_count() - 2, 1),
-    total_env_steps=500_000,
-    action_repeat=4,
+    total_env_steps=1_000_000,
+    # (from_frame, k): k frames per decision from that frame on
+    action_repeat_schedule=((0, 4), (300_000, 3), (500_000, 2), (750_000, 1)),
     no_progress_steps=100,  # None = full 1000-frame training episodes
-    replay_ratio=0.5,
+    updates_per_frame=0.125,
     lr=1e-4,
-    gamma=0.99,  # per frame; the target uses gamma ** action_repeat
+    lr_end=1e-5,  # linear decay to this at the end of the budget; None = constant lr
+    lr_decay_start=300_000,
+    gamma=0.99,  # per frame; each transition is discounted by gamma ** its frames
     batch_size=256,
     buffer_size=100_000,  # transitions (~5.6 GB on the GPU)
-    target_update=500,  # gradient updates
+    target_update=2000,  # gradient updates (= 16k frames at 0.125 updates per frame)
     reward_scale=0.1,
     double_dqn=True,
     epsilon_start=1.0,
@@ -108,7 +112,7 @@ base = dict(
     eval_seed=10_000,
 )
 CONFIGS = [
-    dqn.Config(**base, run_name="ar4_500k"),
+    dqn.Config(**base, run_name="ar_sched_1m"),
 ]
 CONFIGS
 

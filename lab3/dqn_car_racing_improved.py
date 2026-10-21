@@ -9,9 +9,10 @@ steer-left, gas, brake.
 
 Same environment, network and loss as the baseline (dqn_car_racing.py at
 ff03938); see CHANGELOG.md for the evidence behind each change:
-  - action repeat (training only): each decision holds its action for 4
-    frames; the transition stores the summed reward and the target
-    discounts by gamma ** 4. Evals and test_car_racing.py act every frame
+  - action repeat (training only): each decision holds its action for k
+    frames (by default k = 4); the transition stores the summed reward and
+    the target discounts by gamma ** frames. k can step down on a schedule.
+    Evals and test_car_racing.py act every frame
   - training episodes are truncated after 100 frames without a new tile;
     truncations (that and the 1000-frame time limit) bootstrap, only real
     terminals zero the target
@@ -133,6 +134,11 @@ class ActionRepeat(gym.Wrapper):
         return obs, total, terminated, truncated, info
 
 
+def action_repeat_at(schedule, env_steps):
+    """k for the given frame count from ((from_frame, k), ...)."""
+    return max((s for s in schedule if s[0] <= env_steps), key=lambda s: s[0])[1]
+
+
 def make_train_env(no_progress_steps=None, action_repeat=1):
     env = EpisodeInfo(make_env())
     if no_progress_steps is not None:
@@ -202,10 +208,12 @@ class ReplayBuffer:
         self.actions = torch.zeros(capacity, dtype=torch.int64, device=device)
         self.rewards = torch.zeros(capacity, dtype=torch.float32, device=device)
         self.dones = torch.zeros(capacity, dtype=torch.float32, device=device)
+        # gamma ** frames of each transition: action repeat can change during a run
+        self.discounts = torch.zeros(capacity, dtype=torch.float32, device=device)
         self.pos = 0
         self.size = 0
 
-    def push(self, states, actions, rewards, next_states, dones):
+    def push(self, states, actions, rewards, next_states, dones, discounts):
         """Store a batch of transitions (one per env) with one copy each."""
         n = len(actions)
         if n == 0:
@@ -220,6 +228,7 @@ class ReplayBuffer:
         put(self.actions, actions, np.int64)
         put(self.rewards, rewards, np.float32)
         put(self.dones, dones, np.float32)
+        put(self.discounts, discounts, np.float32)
         self.pos = (self.pos + n) % self.capacity
         self.size = min(self.size + n, self.capacity)
 
@@ -227,7 +236,7 @@ class ReplayBuffer:
         idx = torch.randint(0, self.size, (batch_size,), device=device)
         return (self.states[idx], self.actions[idx].unsqueeze(1),
                 self.rewards[idx].unsqueeze(1), self.next_states[idx],
-                self.dones[idx].unsqueeze(1))
+                self.dones[idx].unsqueeze(1), self.discounts[idx].unsqueeze(1))
 
     def __len__(self):
         return self.size
@@ -243,12 +252,19 @@ class Config:
     # data collection; budgets count frames
     num_envs: int = 10
     total_env_steps: int = 500_000
-    action_repeat: int = 4  # training only; evals and the test act every frame
+    # training only; evals and the test act every frame. ((from_frame, k), ...):
+    # k frames per decision from that frame on, e.g. ((0, 4), (400_000, 2))
+    action_repeat_schedule: tuple[tuple[int, int], ...] = ((0, 4),)
     no_progress_steps: int | None = 100  # None = full 1000-frame training episodes
-    # gradient updates per stored transition (one transition = action_repeat frames)
-    replay_ratio: float = 0.5
+    # gradient updates per frame (0.125 = 0.5 per transition at action repeat 4),
+    # so the compute per frame doesn't change with the action repeat
+    updates_per_frame: float = 0.125
     # DQN
     lr: float = 1e-4
+    # linear lr decay from lr at lr_decay_start frames to lr_end at the end of
+    # the budget (lr_end None = constant lr)
+    lr_end: float | None = None
+    lr_decay_start: int = 0
     gamma: float = 0.99  # per frame
     batch_size: int = 256
     buffer_size: int = 100_000  # transitions
@@ -273,8 +289,6 @@ class DQNAgent:
     def __init__(self, action_dim, obs_shape, cfg):
         self.cfg = cfg
         self.action_dim = action_dim
-        # one stored transition spans action_repeat frames
-        self.gamma = cfg.gamma ** cfg.action_repeat
         self.epsilon = cfg.epsilon_start
 
         self.model = QNetwork(a_size=action_dim).to(device)
@@ -297,17 +311,19 @@ class DQNAgent:
         self.stat_updates = 0
         return out
 
-    def remember(self, states, actions, rewards, next_states, dones):
+    def remember(self, states, actions, rewards, next_states, dones, frames):
         # Scale only what the Q-net learns from; episode scores stay in env units
         rewards = np.asarray(rewards, dtype=np.float32) * self.cfg.reward_scale
-        self.memory.push(states, actions, rewards, next_states, dones)
+        discounts = self.cfg.gamma ** np.asarray(frames, dtype=np.float64)
+        self.memory.push(states, actions, rewards, next_states, dones, discounts)
 
     def replay(self):
         cfg = self.cfg
         if len(self.memory) < cfg.batch_size:
             return
 
-        states, actions, rewards, next_states, dones = self.memory.sample(cfg.batch_size)
+        states, actions, rewards, next_states, dones, discounts = \
+            self.memory.sample(cfg.batch_size)
 
         q_values = self.model(states).gather(1, actions)
         with torch.no_grad():
@@ -316,7 +332,7 @@ class DQNAgent:
                 next_q = self.target_model(next_states).gather(1, next_actions)
             else:
                 next_q = self.target_model(next_states).max(1, keepdim=True)[0]
-            target = rewards + self.gamma * next_q * (1 - dones)
+            target = rewards + discounts * next_q * (1 - dones)
         loss = F.smooth_l1_loss(q_values, target)
 
         self.optimizer.zero_grad(set_to_none=True)
@@ -336,6 +352,17 @@ class DQNAgent:
         cfg = self.cfg
         frac = min(env_steps / cfg.epsilon_decay_steps, 1.0)
         self.epsilon = cfg.epsilon_start + frac * (cfg.epsilon_min - cfg.epsilon_start)
+
+    def set_lr(self, env_steps):
+        cfg = self.cfg
+        if cfg.lr_end is None:
+            return cfg.lr
+        span = max(cfg.total_env_steps - cfg.lr_decay_start, 1)
+        frac = min(max(env_steps - cfg.lr_decay_start, 0) / span, 1.0)
+        lr = cfg.lr + frac * (cfg.lr_end - cfg.lr)
+        for group in self.optimizer.param_groups:
+            group["lr"] = lr
+        return lr
 
 
 class EpisodeTracker:
@@ -513,10 +540,11 @@ def train(cfg=None):
     log = RunLog(cfg)
     log.save_json("config.json", {"config": asdict(cfg), "env": environment_info()})
     print(f"Run dir: {log.dir}  (device {device}, {cfg.num_envs} envs, "
-          f"action repeat {cfg.action_repeat}, "
-          f"{cfg.replay_ratio * cfg.num_envs:g} updates per step)")
+          f"action repeat schedule {cfg.action_repeat_schedule}, "
+          f"{cfg.updates_per_frame:g} updates per frame)")
 
-    env = make_vec_env(cfg.num_envs, cfg.no_progress_steps, cfg.action_repeat)
+    action_repeat = action_repeat_at(cfg.action_repeat_schedule, 0)
+    env = make_vec_env(cfg.num_envs, cfg.no_progress_steps, action_repeat)
     eval_env = make_vec_env(min(cfg.eval_envs, cfg.eval_episodes))
     eval_seeds = np.arange(cfg.eval_seed, cfg.eval_seed + cfg.eval_episodes)
     agent = DQNAgent(env.single_action_space.n, env.single_observation_space.shape, cfg)
@@ -529,7 +557,8 @@ def train(cfg=None):
     prev_done = np.zeros(cfg.num_envs, dtype=bool)
     completed = 0
     env_steps = 0
-    update_credit = 0.0  # fractional updates carried over between iterations
+    update_credit = 0.0  # updates earned by the frames run so far, not yet done
+    lr = cfg.lr
     n_evals = 0
     last_eval_at = 0
     t_start = time.time()
@@ -570,13 +599,19 @@ def train(cfg=None):
 
     while env_steps < cfg.total_env_steps:
         agent.set_epsilon(env_steps)
+        lr = agent.set_lr(env_steps)
+        k = action_repeat_at(cfg.action_repeat_schedule, env_steps)
+        if k != action_repeat:
+            # between step_wait and the next step_async, so no step is in flight
+            env.set_attr("k", k)
+            print(f"  Action repeat {action_repeat} -> {k} at {env_steps} frames")
+            action_repeat = k
         t0 = time.time()
         actions, max_q = agent.model.act_batch(states, epsilon=agent.epsilon)
         t1 = time.time()
         # autoreset step: next_states[i] will be a fresh episode start, so env i's
-        # transition isn't stored this iteration and earns no updates
+        # transition isn't stored this iteration
         keep = ~prev_done
-        update_credit += cfg.replay_ratio * keep.sum()
         n_updates = int(update_credit)
         update_credit -= n_updates
         env.step_async(actions)
@@ -593,10 +628,11 @@ def train(cfg=None):
 
         # a truncated episode didn't end in the MDP, so its target still
         # bootstraps from the next state; only real terminals zero it
-        agent.remember(states[keep], actions[keep], rewards[keep], next_states[keep],
-                       terminations[keep])
         frames = info["frames"]
+        agent.remember(states[keep], actions[keep], rewards[keep], next_states[keep],
+                       terminations[keep], frames[keep])
         env_steps += int(frames[keep].sum())
+        update_credit += cfg.updates_per_frame * frames[keep].sum()
 
         for i in np.flatnonzero(keep):
             tracker.step(i, actions[i], max_q[i], rewards[i], frames[i], info["speed"][i])
@@ -609,7 +645,7 @@ def train(cfg=None):
             log.write("episodes", {
                 "episode": completed, "env": int(i), "env_steps": env_steps,
                 "learn_steps": agent.learn_steps, "wall_s": round(time.time() - t_start, 2),
-                "epsilon": agent.epsilon, **row, "avg100": avg,
+                "epsilon": agent.epsilon, "action_repeat": action_repeat, **row, "avg100": avg,
             })
             print(f"Episode {completed}\tScore {row['score']:.1f}\tAvg {avg:.1f}\t"
                   f"Eps {agent.epsilon:.3f}\tLen {row['length']}\t"
@@ -625,7 +661,8 @@ def train(cfg=None):
             log.write("updates", {
                 "learn_steps": agent.learn_steps, "env_steps": env_steps,
                 "episodes": completed, "wall_s": round(now - t_start, 2),
-                "epsilon": agent.epsilon, "buffer": len(agent.memory),
+                "epsilon": agent.epsilon, "lr": lr, "action_repeat": action_repeat,
+                "buffer": len(agent.memory),
                 "env_steps_per_s": (env_steps - last_log["env_steps"]) / dt,
                 "updates_per_s": (agent.learn_steps - last_log["learn_steps"]) / dt,
                 # ms per loop iteration; "act" includes waiting for queued GPU work
@@ -636,7 +673,7 @@ def train(cfg=None):
                         "learn_steps": agent.learn_steps, "loops": 0}
             timing = dict.fromkeys(timing, 0.0)
 
-        # env_steps grows by up to num_envs * action_repeat per iteration, so
+        # env_steps grows by up to num_envs * k per iteration, so
         # compare eval "slots" rather than testing env_steps % eval_every_steps
         if env_steps // cfg.eval_every_steps > last_eval_at // cfg.eval_every_steps:
             run_eval()
