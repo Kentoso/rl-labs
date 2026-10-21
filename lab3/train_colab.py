@@ -13,17 +13,18 @@
 # %% [markdown]
 # # Lab 3 — DQN on CarRacing-v3 (Colab training)
 #
-# Trains `dqn_car_racing.py` from the repo on a Colab GPU (L4 or better) and saves every
-# training artifact to a run directory:
+# Trains `dqn_car_racing_improved.py` (the baseline plus only the changes proven in
+# `CHANGELOG.md`, with action repeat 4) on a Colab GPU and saves every training artifact
+# to a run directory:
 #
 # | File | Contents |
 # |---|---|
-# | `config.json` | full `Config` + device, GPU, CPU count, library versions, git commit |
-# | `episodes.csv` | one row per training episode: score, length, end reason, Q estimate vs discounted return, action counts, ε |
-# | `updates.csv` | every `log_every_updates`: loss, Q, \|TD\| distribution, grad norms, throughput, time per loop phase |
-# | `evals.csv` | one row per greedy eval episode on fixed tracks |
+# | `config.json` | full `Config` + script, device, GPU, CPU count, library versions, git commit |
+# | `episodes.csv` | one row per training episode: score, frames, end reason, tile coverage, speed, Q estimate vs discounted return, frames per action, ε |
+# | `updates.csv` | every `log_every_updates`: loss, Q, \|TD\|, throughput, time per loop phase |
+# | `evals.csv` | one row per greedy eval episode on fixed tracks (acting every frame, like the test) |
 # | `summary.json` | best eval so far, totals (rewritten at every eval) |
-# | `checkpoints/` | `best.pth` (best eval mean), `best_train_avg.pth`, `last.pth`, `ep<N>.pth` at each eval |
+# | `checkpoints/` | `best.pth` (best eval mean), `last.pth`, `step<N>k.pth` at each eval |
 #
 # Runtime → Change runtime type → **GPU (L4)**. CSVs are flushed on every row, so with
 # Google Drive mounted a disconnected session keeps everything up to that point.
@@ -64,7 +65,7 @@ import os
 import sys
 
 sys.path.insert(0, "/content/rl-labs/lab3")
-import dqn_car_racing as dqn
+import dqn_car_racing_improved as dqn
 
 print("device:", dqn.device, "| CPUs:", os.cpu_count())
 if dqn.device.type == "cuda":
@@ -75,49 +76,39 @@ if dqn.device.type == "cuda":
 # %% [markdown]
 # ## Config
 #
-# Envs are stepped in CPU subprocesses. `num_envs` leaves 2 CPUs free for the main
-# process, which launches the GPU work (run 1 used all 12 and was update-bound).
-# `replay_ratio` is gradient updates per stored transition; the updates per loop
-# iteration are derived from it, so runs with different `num_envs` stay comparable.
-# Watch `ms_env_wait` vs `ms_update` in `updates.csv` to see whether the loop waits
-# for the envs (CPU) or the updates (GPU).
-#
-# The budget is in env steps (frames). `CONFIGS` holds one config per run, and they
-# run one after another. Current screen: action repeat 4 vs 1 at 100k frames, both
-# with a dueling head and a 200k buffer. With repeat 4, `replay_ratio=0.5` per
-# transition gives the same updates per frame as repeat 1 at 0.125, so both runs get
-# equal compute.
+# Budgets, ε and evals count frames. Each training decision holds its action for
+# `action_repeat` frames; evals and the test act every frame. `replay_ratio` is gradient
+# updates per stored transition (0.5 × 1/4 = 0.125 updates per frame). `num_envs` leaves
+# 2 CPUs free for the main process. `CONFIGS` holds one config per run, and they run one
+# after another.
 
 # %% tags=["parameters"]
 base = dict(
     out_dir=OUT_DIR,
     seed=0,
     num_envs=max(os.cpu_count() - 2, 1),
-    n_episodes=None,
-    total_env_steps=100_000,
+    total_env_steps=500_000,
+    action_repeat=4,
     no_progress_steps=100,  # None = full 1000-frame training episodes
-    bootstrap_truncation=True,  # False = timeouts stored as terminal (baseline)
+    replay_ratio=0.5,
     lr=1e-4,
-    gamma=0.99,  # per frame; with action repeat k the target uses gamma ** k
+    gamma=0.99,  # per frame; the target uses gamma ** action_repeat
     batch_size=256,
-    buffer_size=200_000,  # ~11 GB of GPU memory (uint8 state + next_state)
+    buffer_size=100_000,  # transitions (~5.6 GB on the GPU)
     target_update=500,  # gradient updates
-    double_dqn=True,
-    dueling=True,
     reward_scale=0.1,
-    max_grad_norm=10.0,  # None disables clipping
+    double_dqn=True,
     epsilon_start=1.0,
     epsilon_min=0.05,
-    epsilon_decay_steps=50_000,  # None = per-episode decay by epsilon_decay
-    epsilon_decay=0.995,
+    epsilon_decay_steps=50_000,
     log_every_updates=500,
     eval_every_steps=25_000,
-    eval_episodes=10,
+    eval_episodes=30,
+    eval_envs=10,
     eval_seed=10_000,
 )
 CONFIGS = [
-    dqn.Config(**base, run_name="duel_ar4", action_repeat=4, replay_ratio=0.5),
-    dqn.Config(**base, run_name="duel_ar1", action_repeat=1, replay_ratio=0.125),
+    dqn.Config(**base, run_name="ar4_500k"),
 ]
 CONFIGS
 

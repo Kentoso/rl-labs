@@ -400,6 +400,108 @@ on the L4 to reach 829 / 86.
   11.6 per iteration of 40 frames); ar1 250 frames/s. ar1's last eval took 301 s instead
   of 10 s, probably the Mac being busy or sleeping, which also lowers its frames/s.
 
+## 2026-10-21 — `dqn_car_racing_improved.py`: baseline + only the proven changes (uncommitted)
+
+A second training script, copied from the upstream baseline (`ff03938`) with only the
+changes the runs above support. `dqn_car_racing.py` stays as the experiments sandbox;
+`train_colab.py` now trains `dqn_car_racing_improved.py`.
+
+| Kept | Evidence |
+|---|---|
+| Device replay buffer, batched acting, env stepping overlapped with updates, fused Adam, MPS | benchmarks (34.3 → 26.0 ms/step) |
+| No-progress cut (100 frames), truncation bootstraps, linear ε per frame (50k), budget/evals in frames | run 2 bundle (2× sample efficiency) |
+| Action repeat 4, γ⁴ per transition | runs 4–5 (750 vs 9 at 100k) |
+| Batch 256, replay ratio 0.5/transition, target_update 500, buffer 100k, 10 envs | the `duel_ar4` config |
+| CSV artifacts; tiles/speed/Q/loss/\|TD\| logs; timings | infrastructure |
+| 30 eval tracks (in rounds of 10) every 25k frames pick `best.pth` | run 3 showed 10 tracks pick noise |
+| Baseline `make_env`, `QNetwork`, Huber loss, `test()`/`render()` | unchanged (`test()` gets the `break` fix) |
+
+Dropped: gradient clipping (never fired in 5 runs), AMP/GradScaler (unbenchmarked, likely
+syncs every update; fp32 with TF32 instead), TD-distribution and grad-norm stats, Double
+DQN, reward scale, dueling (Double DQN and reward scale were restored after validation, see
+below). The last three were never A/B-tested; they were dropped to keep
+only what was shown to matter, so a validation run was required first.
+
+### Validation 1: without Double DQN, reward scale and dueling — failed
+
+100k frames, local MPS, otherwise identical to `duel_ar4`. Pass criterion agreed beforehand:
+within ~150 of `duel_ar4`'s 750 at 100k on the same tracks.
+
+| eval mean, seeds 10000–10009 | 25k | 50k | 75k | 100k |
+|---|---|---|---|---|
+| `duel_ar4` (dueling + Double DQN + /10) | 197 | 391 | 658 | **750 ± 89** |
+| `ar_validate` (none of the three) | −55 | 160 | 533 | **519 ± 242** |
+
+Gap 231 → fail. Over all 30 tracks: 541 ± 230, tile coverage 64%, 2/30 laps. Q-values lag
+far behind the returns: eval `q_start` 15 vs discounted return 54 (`duel_ar4`: 23 vs 37).
+Suspect: **reward scale**. With action repeat 4, one transition sums ~4 frames of tile
+reward (up to ~7–10 raw), and mean |TD| is 0.71 raw, so many samples sit in Huber's linear
+part where the gradient is capped at ±1 and values grow slowly. With per-frame rewards this
+hadn't mattered. Single seed per config, so this is a lead, not proof.
+
+### Validation 2: reward scale /10 restored — Q lag fixed, still failed
+
+Same run with `reward_scale=0.1` added back to `dqn_car_racing_improved.py` (stored rewards only;
+logs in env units).
+
+| eval mean, seeds 10000–10009 | 25k | 50k | 75k | 100k |
+|---|---|---|---|---|
+| `duel_ar4` | 197 | 391 | 658 | **750 ± 89** |
+| `ar_validate` (no /10) | −55 | 160 | 533 | 519 ± 242 |
+| `ar_validate_rs0.1` (/10) | −50 | 448 | 495 | **453 ± 270** |
+
+Over all 30 tracks: −24 / 435 / 555 / 520, best 555 at 75k; mins down to −29.
+- The scale **did** fix the value lag: eval `q_start` 27 vs return 38 at 100k (no /10: 15
+  vs 54; `duel_ar4`: 23 vs 37), mean |TD| 0.071 scaled. Learning is faster early on (435 at
+  50k vs 177 without /10).
+- It did **not** close the gap at 100k: both variants plateau around 520 on 30 tracks with
+  a std of ~230 and some tracks failing badly; `duel_ar4` had a std of 89.
+- **How many samples sit in Huber's linear part without /10:** measured afterwards on both
+  runs' `last.pth`. About 3000 transitions each from 10 training envs (action repeat 4,
+  ε = 0.05, no-progress cut); δ = r + γ⁴·max Q(s′) − Q(s,a) in the units the loss sees,
+  with the online net standing in for the target net (not saved):
+
+  | final checkpoint | mean \|δ\| | median | p90 | p99 | \|δ\| ≥ 1 (linear Huber) | \|δ\| ≥ 3 |
+  |---|---|---|---|---|---|---|
+  | no /10 (raw units) | 2.22 | 1.90 | 4.33 | 8.33 | **76.5%** | 23.5% |
+  | /10 (scaled units) | 0.21 | 0.17 | 0.41 | 0.78 | **0.2%** | 0% |
+
+  Raw reward per transition: mean 1.6–2.4, max 10–11. Without /10, three quarters of the
+  batch get the same ±1 gradient whether they're off by 1.1 or by 8, so the loss behaves
+  mostly like L1 (pulls Q toward the median target), and only the remaining quarter carries
+  error magnitude. With /10 it's effectively MSE. This describes the end of training: the
+  logged run-average mean |TD| without /10 was 0.71, since errors start near 0 while Q ≈ 0.
+  Absolute gradient size doesn't matter here (Adam normalizes it away); the relative
+  weighting and the 10× closer targets do.
+- Remaining suspects: Double DQN and/or dueling, or seed luck.
+
+### Validation 3: seed check of the reference + Double DQN restored — passed
+
+Two more 100k-frame local runs: `duel_ar4` again with `seed=1` (sandbox, same config), and
+`dqn_car_racing_improved.py` with /10 **and** Double DQN (new flag `double_dqn`).
+
+| eval mean ± std, seeds 10000–10009 | 25k | 50k | 75k | 100k | q_start / return at 100k |
+|---|---|---|---|---|---|
+| `duel_ar4` (seed 0) | 197 | 391 | 658 | **750 ± 89** | 23 / 37 |
+| `duel_ar4_seed1` | −3 | 437 | 522 | **652 ± 186** | 25 / 39 |
+| new, no /10, no DDQN | −55 | 160 | 533 | 519 ± 242 | 15 / 54 |
+| new, /10, no DDQN | −50 | 448 | 495 | 453 ± 270 | 27 / 38 |
+| **new, /10 + DDQN** | −3 | 463 | 565 | **635 ± 161** | 23 / 39 |
+
+On all 30 tracks, new + /10 + DDQN: −1 / 496 / 606 / **704**, min 370 at 100k, 3/30 laps,
+80% tile coverage.
+
+- **The reference is partly seed luck:** the same `duel_ar4` config scores 750 and 652 with
+  two seeds, so seed-to-seed spread at 100k is ~100. 750 was the lucky end.
+- **New script + /10 + Double DQN is within seed noise of the reference** (635 vs 652 / 750
+  on the same tracks) → pass (criterion: within ~150 of 750). **Dueling isn't needed.**
+- **Double DQN mattered here:** without it 453 ± 270 with some tracks failing (min 15);
+  with it 635 ± 161, min 370 over 30 tracks. The gap (182) is larger than the observed seed
+  spread, though each variant of the new script has only one seed.
+- **Decision:** `dqn_car_racing_improved.py` keeps reward scale /10 and Double DQN (both on by
+  default) and stays without dueling. `duel_ar4` is one seed, and
+  nothing yet shows how much a second seed of the same config would vary.
+
 ## Investigated, not adopted
 
 ### Mixed precision on MPS
