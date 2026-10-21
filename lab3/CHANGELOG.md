@@ -632,6 +632,41 @@ tracks as run 7, so the comparison is paired per track:
 run 7), constant lr 1e-4, `target_update=2000`, γ 0.995, n = 3, 300k frames, to see whether
 the plateau moves above run 7's ~780 eval; then the official test.
 
+**Run 9, Colab L4, `g995_n3_300k` (`20ac941`, 300k frames, 22.6 min): not reproduced, worse
+than run 7.** Same config and seed as run 8 (plus 200k more frames); paired against run 7 on the
+same 30 eval tracks:
+
+| Frames | Run 9 | Run 8 (local) | Run 7 | Run 9 − run 7 (± SE) | q_start / return_disc |
+|--------|-------|---------------|-------|----------------------|-----------------------|
+| 50k    | 243.6 | 298.6 | 26.6  | +217 ± 39  | 10.3 / 65.7 |
+| 75k    | 490.6 | 606.3 | 143.3 | +347 ± 64  | 14.4 / 81.5 |
+| 100k   | 488.4 | 729.4 | 472.6 | +16 ± 57   | 16.1 / 64.3 |
+| 150k   | **702.1** (best) | — | 602.1 | +100 ± 47 | 24.7 / 97.4 |
+| 200k   | 609.3 | — | 743.6 | −134 ± 35  | 34.4 / 82.0 |
+| 250k   | 668.0 | — | 781.7 | −114 ± 18  | 38.9 / 90.6 |
+| 300k   | 652.8 | — | 730.3 | −77 ± 36   | 46.9 / 88.2 |
+
+`test_car_racing.py best.pth 50`: **mean 645.6, std 195.2, min −80.8, max 896.2**, far below
+run 7 (798.4) and the baseline (819.0 rerun).
+
+- The early speed-up is real (both runs are +200–460 over run 7 at 50–75k), but run 8's 729 at
+  100k was a lucky draw: run 9 is at 488 there. Same seed, but MPS vs CUDA aren't bitwise equal,
+  so the runs diverge; one-run comparisons at 100k can be off by ~250.
+- From 200k on it plateaus at ~650–700, 80–130 below run 7 on the same tracks, with more
+  failed tracks (min 24 at 300k) and slower driving (eval speed ~40 vs ~45).
+- Q never catches up: 47 vs a discounted return of 88 at 300k, still rising ~linearly. The values
+  are ~2× larger at γ 0.995, and with the target synced every 2000 updates and lr 1e-4 the
+  network needs far longer to fit them. Mean |TD| keeps growing (0.09 → 0.23 scaled units).
+- Training episodes cut by no-progress don't disappear (14 of 54 at 250–300k vs 4 of 52 in run 7).
+
+The two changes are confounded. Candidates: γ 0.995 (bigger values, slower fitting) or the
+n-step bias (3 behaviour-policy decisions per target). **Proposed:** not adopted as is; script defaults
+stay γ 0.99, n = 1. Next candidate: γ 0.99 with n = 3 alone (keeps the value scale, keeps the
+faster propagation).
+
+**Next:** notebook config `g99_n3_300k`: run 9 with γ 0.99 (n = 3, k = 4, `target_update=2000`,
+lr 1e-4, seed 0, 300k frames), compared with run 7 (γ 0.99, n = 1) on the same tracks.
+
 ## Investigated, not adopted
 
 ### Mixed precision on MPS

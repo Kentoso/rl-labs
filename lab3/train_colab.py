@@ -79,7 +79,7 @@ if dqn.device.type == "cuda":
 # Budgets, ε, lr and evals count frames. Each training decision holds its action for k = 4
 # frames (`action_repeat_schedule` can step k down, but k = 1 hurt in run 7); evals and the
 # test act every frame. Targets are 3-step returns over decisions (12 frames at k = 4) with
-# γ 0.995 per frame (run 8). `updates_per_frame` keeps the compute per frame the same at every k. `num_envs` leaves
+# γ 0.99 per frame (γ 0.995 plateaued lower, run 9). `updates_per_frame` keeps the compute per frame the same at every k. `num_envs` leaves
 # 2 CPUs free for the main process. `CONFIGS` holds one config per run, and they run one
 # after another.
 
@@ -96,7 +96,7 @@ base = dict(
     lr=1e-4,
     lr_end=None,  # linear decay to this at the end of the budget; None = constant lr
     lr_decay_start=0,
-    gamma=0.995,  # per frame; each transition is discounted by gamma ** its frames
+    gamma=0.99,  # per frame; each transition is discounted by gamma ** its frames
     n_step=3,  # decisions summed per target before bootstrapping
     batch_size=256,
     buffer_size=100_000,  # transitions (~5.6 GB on the GPU)
@@ -113,7 +113,8 @@ base = dict(
     eval_seed=10_000,
 )
 CONFIGS = [
-    dqn.Config(**base, run_name="g995_n3_300k"),
+    dqn.Config(**base, run_name="g99_n3_300k"),
+    # dqn.Config(**{**base, "seed": 1}, run_name="g99_n3_300k_seed1"),
 ]
 CONFIGS
 
